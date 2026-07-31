@@ -2,6 +2,18 @@
 
 Northstar is a browser-based Kubernetes operations cockpit for contexts, namespaces, pods, workloads, nodes, events, logs, actions, Metrics Server, and Prometheus.
 
+## What Northstar Provides
+
+- Command palette with `Cmd+K` / `Ctrl+K`
+- Multi-cluster summary across every kube context
+- Pod, workload, node, event, and alert views
+- Generic resource explorer for built-in Kubernetes resources and CRDs
+- YAML and describe inspector for live resources
+- Live pod logs and guarded pod exec
+- Managed local port-forwards
+- Metrics Server and Prometheus integration
+- Read-only mode for safe real-cluster handoffs
+
 ## Connect to an existing cluster
 
 Requirements: Node.js 18+, `kubectl`, and a kubeconfig that can already access the cluster.
@@ -24,6 +36,8 @@ export NORTHSTAR_READ_ONLY=true
 ```
 
 Read-only mode still shows contexts, namespaces, pods, workloads, nodes, events, logs, Metrics Server values, and Prometheus queries. It blocks rollout restart, scale, resource changes, delete, and pod exec at the API layer.
+
+Read-only mode also blocks managed port-forward start/stop operations. Existing resource discovery, YAML, describe, logs, events, metrics, and Prometheus query views remain available.
 
 Enable actions only after using a scoped kubeconfig or ServiceAccount:
 
@@ -52,7 +66,7 @@ Open `http://localhost:5173`.
 
 The Compose setup starts Northstar and Prometheus. It is intended for localhost or a private network; do not expose the operator endpoint publicly without authentication and a restricted RBAC profile.
 
-If the target cluster already has Prometheus, set `NORTHSTAR_PROMETHEUS_URL` in `.env`. Otherwise the bundled Prometheus scrapes Northstar's `/metrics` endpoint.
+If the target cluster already has Prometheus, set `NORTHSTAR_COMPOSE_PROMETHEUS_URL` in `.env`. Otherwise the bundled Prometheus scrapes Northstar's `/metrics` endpoint.
 
 ## Real Cluster Handoff
 

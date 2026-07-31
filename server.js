@@ -2,7 +2,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const { URL } = require('node:url');
-const { execFile } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
 
 const port = Number(process.env.PORT || 5173);
 const root = __dirname;
@@ -12,6 +12,7 @@ const prometheusUrl = process.env.NORTHSTAR_PROMETHEUS_URL || '';
 const kubeconfig = process.env.NORTHSTAR_KUBECONFIG || process.env.KUBECONFIG || '';
 const dashboardFile = path.join(root, 'dashboards.json');
 const readOnly = /^(1|true|yes|on)$/i.test(process.env.NORTHSTAR_READ_ONLY || '');
+const portForwards = new Map();
 
 const simulatedContexts = [
   { name: 'production-east', cluster: 'prod-east', environment: 'Production', color: '#63d5d4' },
@@ -33,14 +34,47 @@ function execKubectl(context, args, options = {}) {
   return new Promise((resolve, reject) => execFile(kubectl, ['--context', context, ...args], { maxBuffer: 16 * 1024 * 1024, env, ...options }, (error, stdout, stderr) => error ? reject(new Error(stderr || error.message)) : resolve(stdout)));
 }
 async function json(context, args) { return JSON.parse(await execKubectl(context, args)); }
+function kubectlEnv() { return { ...process.env, ...(kubeconfig ? { KUBECONFIG:kubeconfig } : {}) }; }
 function send(res, status, body, type = 'application/json') { res.writeHead(status, { 'Content-Type': `${type}; charset=utf-8`, 'Cache-Control': 'no-store' }); res.end(type === 'application/json' ? JSON.stringify(body) : body); }
 function body(req) { return new Promise(resolve => { let data = ''; req.on('data', x => data += x); req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch { resolve({}); } }); }); }
 function age(date) { if (!date) return '—'; const mins = Math.max(1, Math.floor((Date.now() - new Date(date).getTime()) / 60000)); return mins < 60 ? `${mins}m` : mins < 1440 ? `${Math.floor(mins / 60)}h` : `${Math.floor(mins / 1440)}d`; }
 function normalizePod(p) { const owner=(p.metadata.ownerReferences||[])[0]; return { name:p.metadata.name, namespace:p.metadata.namespace, status:p.status.phase || 'Unknown', usage:'— / —', restarts:(p.status.containerStatuses || []).reduce((n,c) => n + c.restartCount, 0), age:age(p.metadata.creationTimestamp), node:p.spec.nodeName || '—', image:(p.spec.containers || []).map(c => c.image).join(', '), cpu:0, memory:0, containers:(p.spec.containers || []).map(c => c.name), ownerKind:owner?.kind?.toLowerCase() || '', ownerName:owner?.name || '' }; }
 function filterItems(items, url) { const ns = url.searchParams.get('namespace'), q = (url.searchParams.get('q') || '').toLowerCase(); return items.filter(x => (!ns || ns === 'all' || x.namespace === ns) && (!q || JSON.stringify(x).toLowerCase().includes(q))); }
 function validResourcePart(value) { return typeof value === 'string' && /^[a-z0-9][a-z0-9.-]{0,62}$/.test(value); }
+function validApiResource(value) { return typeof value === 'string' && /^[a-z0-9./-]{1,120}$/.test(value); }
 function requireResource(a) { if (!validResourcePart(a.namespace) || !validResourcePart(a.name)) throw new Error('Invalid namespace or resource name'); }
 function rejectReadOnly(res) { return send(res, 403, { error:'Northstar is running in read-only mode. Set NORTHSTAR_READ_ONLY=false to enable cluster actions.', readOnly:true }); }
+function summarizeResource(item) {
+  const containers = item.spec?.template?.spec?.containers || item.spec?.containers || [];
+  return {
+    kind:item.kind,
+    name:item.metadata?.name,
+    namespace:item.metadata?.namespace || '',
+    status:item.status?.phase || item.status?.conditions?.find(x=>x.type==='Ready')?.status || item.status?.readyReplicas || item.status?.succeeded || '',
+    age:age(item.metadata?.creationTimestamp),
+    images:containers.map(c=>c.image).filter(Boolean).join(', '),
+    labels:item.metadata?.labels || {},
+  };
+}
+async function resourceCatalog(context) {
+  const out = await execKubectl(context, ['api-resources', '--verbs=list']);
+  const lines = out.trim().split('\n').slice(1).filter(Boolean);
+  return lines.map(line => {
+    const parts = line.trim().split(/\s{2,}/);
+    const hasShortNames = parts.length >= 5;
+    return { name:parts[0], shortNames:hasShortNames ? parts[1] : '', apiGroup:hasShortNames ? parts[2] : parts[1] || '', namespaced:(hasShortNames ? parts[3] : parts[2]) === 'true', kind:hasShortNames ? parts[4] : parts[3] || '' };
+  }).filter(x => x.name);
+}
+async function clusterSummary(context) {
+  let ps,m,version;
+  if (process.env.NORTHSTAR_MODE === 'kubernetes') {
+    [m,version]=await Promise.all([k8sMetrics(context),k8sVersion(context)]);
+    ps=applyMetrics(await k8sPods(context),m);
+  } else {
+    ps=fakePodObjects(context);m={available:true,clusterCpu:42.8,clusterMemory:61.8};version='simulated';
+  }
+  return { name:context, mode:process.env.NORTHSTAR_MODE === 'kubernetes' ? 'kubernetes' : 'simulated', version, health:ps.length ? Math.round(ps.filter(p=>p.status==='Running').length / ps.length * 1000) / 10 : 0, runningPods:ps.filter(p=>p.status==='Running').length, totalPods:ps.length, cpu:m.available ? m.clusterCpu : null, memory:m.available ? m.clusterMemory : null, alerts:ps.filter(p=>p.status!=='Running').length, metricsAvailable:m.available };
+}
 async function queryPrometheus(query) { if (!prometheusUrl) return { configured:false, query, data:null }; const target = `${prometheusUrl.replace(/\/$/,'')}/api/v1/query?${new URLSearchParams({query})}`; const result = await fetch(target); if (!result.ok) throw new Error(`Prometheus returned ${result.status}`); return { configured:true, query, data:await result.json() }; }
 async function metricsText(context) { let ps,m; if (process.env.NORTHSTAR_MODE === 'kubernetes') { m=await k8sMetrics(context); ps=applyMetrics(await k8sPods(context),m); } else { ps=fakePodObjects(context);m={clusterCpu:42.8,clusterMemory:61.8}; } const lines=['# HELP northstar_cluster_cpu_percent Average node CPU utilization.','# TYPE northstar_cluster_cpu_percent gauge',`northstar_cluster_cpu_percent{context="${context}"} ${m.clusterCpu ?? 0}`,'# HELP northstar_cluster_memory_percent Average node memory utilization.','# TYPE northstar_cluster_memory_percent gauge',`northstar_cluster_memory_percent{context="${context}"} ${m.clusterMemory ?? 0}`,'# HELP northstar_pods_total Total pods visible to Northstar.','# TYPE northstar_pods_total gauge',`northstar_pods_total{context="${context}"} ${ps.length}`,'# HELP northstar_pods_running Running pods visible to Northstar.','# TYPE northstar_pods_running gauge',`northstar_pods_running{context="${context}"} ${ps.filter(p=>p.status==='Running').length}`]; ps.forEach(p=>lines.push(`northstar_pod_status{context="${context}",namespace="${p.namespace}",pod="${p.name}",status="${p.status}"} 1`)); return `${lines.join('\n')}\n`; }
 async function contexts() {
@@ -68,7 +102,12 @@ async function route(req, res) {
     if (url.pathname === '/api/config') return send(res, 200, { readOnly, mode:process.env.NORTHSTAR_MODE === 'kubernetes' ? 'kubernetes' : 'simulated', defaultContext, prometheusConfigured:Boolean(prometheusUrl) });
     if (url.pathname === '/api/contexts') return send(res, 200, await contexts());
     if (url.pathname === '/metrics') return send(res,200,await metricsText(context),'text/plain; version=0.0.4');
-    if (url.pathname === '/api/cluster') { let ps,m,version; if (process.env.NORTHSTAR_MODE === 'kubernetes') { [m,version]=await Promise.all([k8sMetrics(context),k8sVersion(context)]); ps=applyMetrics(await k8sPods(context),m); } else { ps=fakePodObjects(context);m={available:true,clusterCpu:context==='staging-west'?31.6:context==='dev-sandbox'?18.2:42.8,clusterMemory:context==='staging-west'?54.2:context==='dev-sandbox'?27.4:61.8};version='simulated'; } return send(res, 200, { name:context, mode:process.env.NORTHSTAR_MODE === 'kubernetes' ? 'kubernetes' : 'simulated', version, health:ps.length ? Math.round(ps.filter(p=>p.status==='Running').length / ps.length * 1000) / 10 : 0, runningPods:ps.filter(p=>p.status==='Running').length, totalPods:ps.length, cpu:m.available ? m.clusterCpu : null, memory:m.available ? m.clusterMemory : null, alerts:ps.filter(p=>p.status!=='Running').length, metricsAvailable:m.available }); }
+    if (url.pathname === '/api/cluster') return send(res, 200, await clusterSummary(context));
+    if (url.pathname === '/api/multicluster') { const list=await contexts(); const summaries=await Promise.all(list.map(c=>clusterSummary(c.name).catch(e=>({name:c.name,error:e.message,health:0,runningPods:0,totalPods:0,alerts:1,metricsAvailable:false})))); return send(res,200,summaries); }
+    if (url.pathname === '/api/resource-types') { if (process.env.NORTHSTAR_MODE !== 'kubernetes') return send(res,200,[{name:'pods',kind:'Pod',namespaced:true},{name:'deployments',apiGroup:'apps',kind:'Deployment',namespaced:true},{name:'nodes',kind:'Node',namespaced:false}]); return send(res,200,await resourceCatalog(context)); }
+    if (url.pathname === '/api/resources') { const resource=url.searchParams.get('resource') || 'pods'; if(!validApiResource(resource)) return send(res,400,{error:'Invalid resource type'}); const ns=url.searchParams.get('namespace'); const args=['get',resource]; if(ns&&ns!=='all') args.push('-n',ns); else args.push('-A'); args.push('-o','json'); const data=process.env.NORTHSTAR_MODE === 'kubernetes' ? await json(context,args) : {items:fakePodObjects(context).map(p=>({kind:'Pod',metadata:{name:p.name,namespace:p.namespace,creationTimestamp:new Date().toISOString()},status:{phase:p.status},spec:{containers:[{image:p.image}]}}))}; return send(res,200,(data.items||[]).map(summarizeResource)); }
+    if (url.pathname === '/api/resource-yaml') { const resource=url.searchParams.get('resource') || 'pods', name=url.searchParams.get('name') || '', ns=url.searchParams.get('namespace') || ''; if(!validApiResource(resource)||!validResourcePart(name)||ns&&!validResourcePart(ns)) return send(res,400,{error:'Invalid resource request'}); const args=['get',resource,name]; if(ns) args.push('-n',ns); args.push('-o','yaml'); return send(res,200,{yaml:await execKubectl(context,args)},'application/json'); }
+    if (url.pathname === '/api/describe') { const resource=url.searchParams.get('resource') || 'pods', name=url.searchParams.get('name') || '', ns=url.searchParams.get('namespace') || ''; if(!validApiResource(resource)||!validResourcePart(name)||ns&&!validResourcePart(ns)) return send(res,400,{error:'Invalid describe request'}); const args=['describe',resource,name]; if(ns) args.push('-n',ns); return send(res,200,{text:await execKubectl(context,args)},'application/json'); }
     if (url.pathname === '/api/namespaces') { if (process.env.NORTHSTAR_MODE === 'kubernetes') return send(res, 200, (await json(context,['get','namespaces','-o','json'])).items.map(x=>x.metadata.name)); return send(res, 200, simulated[context]?.namespaces || []); }
     if (url.pathname === '/api/pods') { let items; if (process.env.NORTHSTAR_MODE === 'kubernetes') { const m=await k8sMetrics(context);items=applyMetrics(await k8sPods(context),m); } else items=fakePodObjects(context); return send(res, 200, filterItems(items,url)); }
     if (url.pathname === '/api/prometheus/status') return send(res,200,{configured:Boolean(prometheusUrl),url:prometheusUrl || null});
@@ -91,6 +130,30 @@ async function route(req, res) {
     if (url.pathname === '/api/alerts') { const events = process.env.NORTHSTAR_MODE === 'kubernetes' ? (await json(context,['get','events','-A','-o','json'])).items : []; return send(res,200,events.filter(e=>e.type==='Warning').slice(-20).map(e=>({severity:'warning',title:e.reason,description:e.message,namespace:e.metadata.namespace}))); }
     if (url.pathname === '/api/dashboards' && req.method === 'GET') { let dashboards=[]; try { dashboards=JSON.parse(fs.readFileSync(dashboardFile,'utf8')); } catch {} return send(res,200,dashboards); }
     if (url.pathname === '/api/dashboards' && req.method === 'POST') { const data=await body(req); let dashboards=[]; try { dashboards=JSON.parse(fs.readFileSync(dashboardFile,'utf8')); } catch {} const dashboard={id:Date.now().toString(),name:data.name||'Untitled dashboard',context:data.context||context,widgets:data.widgets||['pod-health','resource-usage','events'],createdAt:new Date().toISOString()}; dashboards.push(dashboard); fs.writeFileSync(dashboardFile,JSON.stringify(dashboards,null,2)); return send(res,201,dashboard); }
+    if (url.pathname === '/api/port-forwards' && req.method === 'GET') return send(res,200,[...portForwards.values()].map(({child,...x})=>x));
+    if (url.pathname === '/api/port-forwards' && req.method === 'POST') {
+      if (readOnly) return rejectReadOnly(res);
+      const a=await body(req), kind=String(a.kind||'pod').toLowerCase(), name=String(a.name||''), ns=String(a.namespace||''), local=Number(a.localPort), remote=Number(a.remotePort), actionContext=a.context || context;
+      if (!['pod','service','deployment'].includes(kind) || !validResourcePart(name) || !validResourcePart(ns) || !Number.isInteger(local) || !Number.isInteger(remote) || local<1024 || local>65535 || remote<1 || remote>65535) return send(res,400,{error:'Invalid port-forward request'});
+      const id=`${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const child=spawn(kubectl, ['--context', actionContext, 'port-forward', '-n', ns, `${kind}/${name}`, `${local}:${remote}`], { env:kubectlEnv(), stdio:['ignore','pipe','pipe'] });
+      const entry={id,context:actionContext,kind,name,namespace:ns,localPort:local,remotePort:remote,status:'starting',message:'Starting port-forward',createdAt:new Date().toISOString(),child};
+      child.stdout.on('data', d=>{entry.status='running';entry.message=String(d).trim()||entry.message});
+      child.stderr.on('data', d=>{entry.message=String(d).trim()||entry.message});
+      child.on('exit', code=>{entry.status=code===0?'stopped':'failed';entry.exitCode=code;delete entry.child});
+      portForwards.set(id,entry);
+      return send(res,201,{...entry,child:undefined});
+    }
+    const portForwardDelete = url.pathname.match(/^\/api\/port-forwards\/([^/]+)$/);
+    if (portForwardDelete && req.method === 'DELETE') {
+      if (readOnly) return rejectReadOnly(res);
+      const item=portForwards.get(portForwardDelete[1]);
+      if (!item) return send(res,404,{error:'Port-forward not found'});
+      if (item.child) item.child.kill('SIGTERM');
+      item.status='stopped';
+      item.message='Stopped by user';
+      return send(res,200,{ok:true,id:item.id});
+    }
     if (url.pathname === '/api/actions' && req.method === 'POST') { if (readOnly) return rejectReadOnly(res); const a=await body(req); requireResource(a); const actionContext=a.context || context; if (process.env.NORTHSTAR_MODE !== 'kubernetes') return send(res,200,{ok:true,simulated:true,message:`${a.action} simulated for ${a.name}`}); const ns=a.namespace, name=a.name, kind=(a.kind||'deployment').toLowerCase(); if (a.action==='scale' && kind==='pod') return send(res,400,{error:'Pods cannot be scaled individually; scale their owning workload instead'}); if (a.action==='resources' && kind==='pod') return send(res,409,{error:'Pod resources are immutable in this cluster. Apply the resource change to its owning workload.',workloadActionRequired:true}); if (a.action==='rollout-restart' && kind==='pod') await execKubectl(actionContext,['delete','pod',name,'-n',ns]); else if (a.action==='rollout-restart') { await execKubectl(actionContext,['rollout','restart',`${kind}/${name}`,'-n',ns]); await execKubectl(actionContext,['rollout','status',`${kind}/${name}`,'-n',ns,'--timeout=30s']); } else if (a.action==='scale') { const replicas=Math.max(0,Math.min(20,Number(a.replicas))); if (!Number.isInteger(replicas)) return send(res,400,{error:'replicas must be an integer from 0 to 20'}); await execKubectl(actionContext,['scale',`${kind}/${name}`,'-n',ns,`--replicas=${replicas}`]); } else if (a.action==='resources') { const container=a.container || ''; const args=['set','resources',`${kind}/${name}`,'-n',ns]; if(container)args.push(`--containers=${container}`); if(a.requestsCpu)args.push(`--requests=cpu=${a.requestsCpu}`); if(a.requestsMemory)args.push(`--requests=memory=${a.requestsMemory}`); if(a.limitsCpu)args.push(`--limits=cpu=${a.limitsCpu}`); if(a.limitsMemory)args.push(`--limits=memory=${a.limitsMemory}`); if(args.length===5)return send(res,400,{error:'Provide at least one resource value'}); await execKubectl(actionContext,args); } else if (a.action==='delete') await execKubectl(actionContext,['delete',kind,name,'-n',ns]); else return send(res,400,{error:'Unsupported action'}); return send(res,200,{ok:true,message:`${a.action} completed for ${name}`,context:actionContext}); }
     if (url.pathname === '/api/exec' && req.method === 'POST') { if (readOnly) return rejectReadOnly(res); const a=await body(req); const command=String(a.command||'').trim(); if (!validResourcePart(a.namespace) || !validResourcePart(a.name)) return send(res,400,{error:'Invalid namespace or pod name'}); if (!command || command.length>300 || /[;&|`$<>]/.test(command)) return send(res,400,{error:'Use one safe command without shell operators'}); if (process.env.NORTHSTAR_MODE !== 'kubernetes') return send(res,200,{output:`$ ${command}\n(simulated shell)\nNorthstar demo container is healthy.`}); const output=await execKubectl(a.context || context,['exec','-n',a.namespace,`pod/${a.name}`,'-c',a.container||'app','--','/bin/sh','-c',command]); return send(res,200,{output}); }
     if (url.pathname === '/' || url.pathname === '/index.html') return send(res,200,fs.readFileSync(path.join(root,'index.html')),'text/html');
