@@ -1,20 +1,26 @@
 services:
   northstar:
     build: .
+    env_file:
+      - path: .env
+        required: false
     ports:
-      - "${PORT:-5173}:5173"
+      - "127.0.0.1:${PORT:-5173}:5173"
     environment:
       NORTHSTAR_MODE: ${NORTHSTAR_MODE:-kubernetes}
       NORTHSTAR_CONTEXT: ${NORTHSTAR_CONTEXT:-production-east}
+      NORTHSTAR_READ_ONLY: ${NORTHSTAR_READ_ONLY:-true}
       NORTHSTAR_KUBECONFIG: /kube/config
-      NORTHSTAR_PROMETHEUS_URL: http://prometheus:9090
+      NORTHSTAR_PROMETHEUS_URL: ${NORTHSTAR_COMPOSE_PROMETHEUS_URL:-http://prometheus:9090}
     volumes:
-      - ${NORTHSTAR_KUBECONFIG_PATH:-./kubeconfig}:/kube/config:ro
+      - ${NORTHSTAR_KUBECONFIG_PATH:-${HOME}/.kube/config}:/kube/config:ro
     depends_on:
       - prometheus
+    restart: unless-stopped
   prometheus:
     image: prom/prometheus
     ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./prometheus.docker.yml:/etc/prometheus/prometheus.yml:ro
+    restart: unless-stopped

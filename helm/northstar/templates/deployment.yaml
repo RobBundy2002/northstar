@@ -27,6 +27,8 @@ spec:
               value: kubernetes
             - name: NORTHSTAR_CONTEXT
               value: {{ .Values.context | quote }}
+            - name: NORTHSTAR_READ_ONLY
+              value: {{ .Values.readOnly | quote }}
             - name: NORTHSTAR_KUBECONFIG
               value: /kube/config
             - name: NORTHSTAR_PROMETHEUS_URL

@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
+    "all": "node start-all.js",
     "start:k8s": "NORTHSTAR_MODE=kubernetes NORTHSTAR_CONTEXT=production-east NORTHSTAR_KUBECTL=${NORTHSTAR_KUBECTL:-/tmp/northstar-kubectl} node server.js",
     "start:k8s:prom": "NORTHSTAR_MODE=kubernetes NORTHSTAR_CONTEXT=production-east NORTHSTAR_PROMETHEUS_URL=http://localhost:9090 NORTHSTAR_KUBECTL=${NORTHSTAR_KUBECTL:-/tmp/northstar-kubectl} node server.js",
     "start:all": "node start-all.js",

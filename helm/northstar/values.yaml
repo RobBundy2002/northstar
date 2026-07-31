@@ -7,8 +7,10 @@ service:
   type: ClusterIP
   port: 5173
 context: production-east
+readOnly: true
 prometheusUrl: ""
 kubeconfigSecret: northstar-kubeconfig
 rbac:
   create: true
+  mode: readonly
   serviceAccountName: northstar

@@ -1,8 +1,13 @@
-{{- if .Values.rbac.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: northstar-readonly
+  namespace: northstar
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "northstar.fullname" . }}
+  name: northstar-readonly
 rules:
   - apiGroups: [""]
     resources: ["namespaces", "nodes", "pods", "pods/log", "services", "events"]
@@ -16,28 +21,16 @@ rules:
   - apiGroups: ["metrics.k8s.io"]
     resources: ["nodes", "pods"]
     verbs: ["get", "list"]
-{{- if eq .Values.rbac.mode "operator" }}
-  - apiGroups: [""]
-    resources: ["pods", "pods/exec"]
-    verbs: ["create", "delete"]
-  - apiGroups: ["apps"]
-    resources: ["deployments", "statefulsets", "daemonsets"]
-    verbs: ["patch", "update", "delete"]
-  - apiGroups: ["batch"]
-    resources: ["jobs", "cronjobs"]
-    verbs: ["patch", "update", "delete"]
-{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "northstar.fullname" . }}
+  name: northstar-readonly
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ include "northstar.fullname" . }}
+  name: northstar-readonly
 subjects:
   - kind: ServiceAccount
-    name: {{ .Values.rbac.serviceAccountName }}
-    namespace: {{ .Release.Namespace }}
-{{- end }}
+    name: northstar-readonly
+    namespace: northstar
