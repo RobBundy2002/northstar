@@ -1,0 +1,16 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: feature-preview
+  namespace: northstar
+  labels: { app: feature-preview }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: feature-preview } }
+  template:
+    metadata: { labels: { app: feature-preview } }
+    spec:
+      containers:
+        - name: preview
+          image: northstar/does-not-exist:dev
+          resources: { requests: { cpu: 10m, memory: 16Mi }, limits: { cpu: 100m, memory: 64Mi } }

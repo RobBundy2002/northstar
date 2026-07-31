@@ -5,7 +5,10 @@
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
-    "start:k8s": "NORTHSTAR_MODE=kubernetes NORTHSTAR_CONTEXT=kind-northstar NORTHSTAR_KUBECTL=${NORTHSTAR_KUBECTL:-/tmp/northstar-kubectl} node server.js",
+    "start:k8s": "NORTHSTAR_MODE=kubernetes NORTHSTAR_CONTEXT=production-east NORTHSTAR_KUBECTL=${NORTHSTAR_KUBECTL:-/tmp/northstar-kubectl} node server.js",
+    "start:k8s:prom": "NORTHSTAR_MODE=kubernetes NORTHSTAR_CONTEXT=production-east NORTHSTAR_PROMETHEUS_URL=http://localhost:9090 NORTHSTAR_KUBECTL=${NORTHSTAR_KUBECTL:-/tmp/northstar-kubectl} node server.js",
+    "start:all": "node start-all.js",
+    "prometheus:start": "docker run --rm --name northstar-prometheus --add-host=host.docker.internal:host-gateway -p 9090:9090 -v \"$PWD/prometheus.yml:/etc/prometheus/prometheus.yml:ro\" prom/prometheus",
     "test": "echo \"No automated tests configured\""
   },
   "private": true
