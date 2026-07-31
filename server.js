@@ -6,63 +6,60 @@ const { execFile } = require('node:child_process');
 
 const port = Number(process.env.PORT || 5173);
 const root = __dirname;
-const realKubernetes = process.env.NORTHSTAR_MODE === 'kubernetes';
 const kubectl = process.env.NORTHSTAR_KUBECTL || 'kubectl';
-const kubeContext = process.env.NORTHSTAR_CONTEXT || 'kind-northstar';
-const pods = [
-  { name:'payments-api-7d88c96bbf-jk4m2', namespace:'platform', status:'Running', usage:'12m / 384Mi', restarts:0, age:'2d', node:'compute-02', image:'northstar/platform:v2.8.1', cpu:38, memory:62 },
-  { name:'payments-api-7d88c96bbf-v9p8q', namespace:'platform', status:'Running', usage:'10m / 379Mi', restarts:0, age:'2d', node:'compute-03', image:'northstar/platform:v2.8.1', cpu:34, memory:59 },
-  { name:'checkout-worker-5f6d4c7f79-q2r8x', namespace:'payments', status:'Running', usage:'28m / 512Mi', restarts:1, age:'6h', node:'compute-04', image:'northstar/payments:v2.8.1', cpu:51, memory:74 },
-  { name:'checkout-worker-5f6d4c7f79-wn7c4', namespace:'payments', status:'Running', usage:'25m / 498Mi', restarts:0, age:'6h', node:'compute-01', image:'northstar/payments:v2.8.1', cpu:46, memory:68 },
-  { name:'grafana-6c8b69b8cf-nm2kd', namespace:'observability', status:'Running', usage:'8m / 256Mi', restarts:0, age:'14d', node:'compute-02', image:'grafana/grafana:11.2', cpu:18, memory:43 },
-  { name:'loki-0', namespace:'observability', status:'Running', usage:'42m / 1.2Gi', restarts:0, age:'14d', node:'compute-03', image:'grafana/loki:3.1', cpu:27, memory:61 },
-  { name:'billing-sync-66c79d89d4-xk52l', namespace:'payments', status:'Pending', usage:'— / —', restarts:3, age:'4m', node:'—', image:'northstar/payments:v2.8.1', cpu:0, memory:0 },
-  { name:'edge-router-7c97b68b89-pw1f7', namespace:'platform', status:'Running', usage:'16m / 197Mi', restarts:0, age:'21d', node:'compute-04', image:'northstar/platform:v2.8.1', cpu:29, memory:35 },
-];
-const logs = [
-  'request completed method=GET path=/v1/orders duration=42ms', 'reconciled deployment replicas=3 ready=3',
-  'cache hit key=customer:88421 ttl=240s', 'health check passed component=postgres',
-  'request completed method=POST path=/v1/charge duration=118ms', 'connection pool active=12 idle=8',
-  'received graceful shutdown signal'
-];
+const defaultContext = process.env.NORTHSTAR_CONTEXT || 'production-east';
+const dashboardFile = path.join(root, 'dashboards.json');
 
-function kubectlJson(args) {
-  return new Promise((resolve, reject) => execFile(kubectl, ['--context', kubeContext, ...args], { maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
-    if (error) return reject(new Error(stderr || error.message));
-    try { resolve(JSON.parse(stdout)); } catch { reject(new Error('kubectl returned invalid JSON')); }
-  }));
-}
-function realPods(items) {
-  return items.map(p => ({
-    name: p.metadata.name, namespace: p.metadata.namespace, status: p.status.phase,
-    usage: '— / —', restarts: (p.status.containerStatuses || []).reduce((n, c) => n + c.restartCount, 0),
-    age: p.metadata.creationTimestamp ? new Date(p.metadata.creationTimestamp).toLocaleDateString() : '—',
-    node: p.spec.nodeName || '—', image: (p.spec.containers || []).map(c => c.image).join(', '), cpu: 0, memory: 0,
-  }));
-}
-async function getRealPods() { return realPods((await kubectlJson(['get', 'pods', '-A', '-o', 'json'])).items); }
+const simulatedContexts = [
+  { name: 'production-east', cluster: 'prod-east', environment: 'Production', color: '#63d5d4' },
+  { name: 'staging-west', cluster: 'stage-west', environment: 'Staging', color: '#e5ad65' },
+  { name: 'dev-sandbox', cluster: 'dev-sandbox', environment: 'Development', color: '#a79cff' },
+];
+const simulated = {
+  'production-east': { pods: 8, healthy: 7, namespaces: ['platform', 'payments', 'observability'], workloads: [['Deployment','payments-api','platform',2,2],['Deployment','checkout-worker','payments',2,2],['Deployment','StatefulSet','loki','observability',1,1]], nodes: 3 },
+  'staging-west': { pods: 5, healthy: 4, namespaces: ['northstar', 'preview', 'observability'], workloads: [['Deployment','payments-api','northstar',3,3],['Deployment','checkout-worker','northstar',1,1],['Deployment','release-candidate','preview',2,1]], nodes: 2 },
+  'dev-sandbox': { pods: 4, healthy: 3, namespaces: ['northstar', 'feature-flags'], workloads: [['Deployment','payments-api','northstar',1,1],['Deployment','checkout-worker','northstar',1,1],['Deployment','feature-preview','feature-flags',2,1]], nodes: 1 },
+};
+const fakePods = [
+  ['payments-api-7d88c96bbf-jk4m2','platform','Running','12m / 384Mi',0,'2d','compute-02','northstar/platform:v2.8.1',38,62], ['payments-api-7d88c96bbf-v9p8q','platform','Running','10m / 379Mi',0,'2d','compute-03','northstar/platform:v2.8.1',34,59], ['checkout-worker-5f6d4c7f79-q2r8x','payments','Running','28m / 512Mi',1,'6h','compute-04','northstar/payments:v2.8.1',51,74], ['checkout-worker-5f6d4c7f79-wn7c4','payments','Running','25m / 498Mi',0,'6h','compute-01','northstar/payments:v2.8.1',46,68], ['grafana-6c8b69b8cf-nm2kd','observability','Running','8m / 256Mi',0,'14d','compute-02','grafana/grafana:11.2',18,43], ['loki-0','observability','Running','42m / 1.2Gi',0,'14d','compute-03','grafana/loki:3.1',27,61], ['billing-sync-66c79d89d4-xk52l','payments','Pending','— / —',3,'4m','—','northstar/payments:v2.8.1',0,0], ['edge-router-7c97b68b89-pw1f7','platform','Running','16m / 197Mi',0,'21d','compute-04','northstar/platform:v2.8.1',29,35],
+];
+const fakeLogs = ['request completed method=GET path=/v1/orders duration=42ms','reconciled deployment replicas=3 ready=3','cache hit key=customer:88421 ttl=240s','health check passed component=postgres','request completed method=POST path=/v1/charge duration=118ms','connection pool active=12 idle=8'];
 
-function send(res, status, body, type='application/json') { res.writeHead(status, {'Content-Type': `${type}; charset=utf-8`, 'Cache-Control':'no-store'}); res.end(type === 'application/json' ? JSON.stringify(body) : body); }
-function route(req, res) {
-  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  if (realKubernetes && url.pathname === '/api/cluster') return getRealPods().then(list => send(res, 200, { name:kubeContext, mode:'kubernetes', health:list.every(p => p.status === 'Running') ? 100 : 92, runningPods:list.filter(p => p.status === 'Running').length, totalPods:list.length, cpu:0, alerts:list.filter(p => p.status !== 'Running').length })).catch(e => send(res, 503, {error:e.message}));
-  if (realKubernetes && url.pathname === '/api/pods') return getRealPods().then(list => { const ns=url.searchParams.get('namespace'), q=(url.searchParams.get('q')||'').toLowerCase(); return send(res, 200, list.filter(p => (!ns || ns === 'all' || p.namespace === ns) && (!q || JSON.stringify(p).toLowerCase().includes(q)))); }).catch(e => send(res, 503, {error:e.message}));
-  if (realKubernetes && url.pathname.match(/^\/api\/pods\/([^/]+)\/logs$/)) { const name=decodeURIComponent(url.pathname.split('/')[3]); return new Promise(resolve => execFile(kubectl, ['--context',kubeContext,'logs',`pod/${name}`,'--all-containers=true','--tail=50'], {maxBuffer:1024*1024}, (error, stdout) => { const lines=(stdout||'').trim().split('\n').filter(Boolean).map((message,i)=>({time:`live ${i+1}`,level:'INFO',message})); send(res, error ? 404 : 200, error ? {error:'Unable to read pod logs'} : lines); resolve(); })); }
-  if (realKubernetes && url.pathname.match(/^\/api\/pods\/([^/]+)$/)) { const name=decodeURIComponent(url.pathname.split('/')[3]); return getRealPods().then(list => { const pod=list.find(p=>p.name===name); return send(res, pod ? 200 : 404, pod || {error:'Pod not found'}); }).catch(e=>send(res,503,{error:e.message})); }
-  if (url.pathname === '/api/cluster') return send(res, 200, { name:'production-east', mode:'simulated', health:98.7, runningPods:87, totalPods:94, cpu:42.8, alerts:3 });
-  if (url.pathname === '/api/pods') {
-    const ns = url.searchParams.get('namespace');
-    const q = (url.searchParams.get('q') || '').toLowerCase();
-    return send(res, 200, pods.filter(p => (!ns || ns === 'all' || p.namespace === ns) && (!q || JSON.stringify(p).toLowerCase().includes(q))));
-  }
-  const podMatch = url.pathname.match(/^\/api\/pods\/([^/]+)\/([^/]+)$/);
-  if (podMatch && podMatch[2] === 'logs') {
-    const pod = pods.find(p => p.name === decodeURIComponent(podMatch[1]));
-    return send(res, pod ? 200 : 404, pod ? logs.map((message, i) => ({time:`11:${25+i}`, level:i === 4 ? 'WARN' : 'INFO', message})) : {error:'Pod not found'});
-  }
-  const detailMatch = url.pathname.match(/^\/api\/pods\/([^/]+)$/);
-  if (detailMatch) { const pod = pods.find(p => p.name === decodeURIComponent(detailMatch[1])); return send(res, pod ? 200 : 404, pod || {error:'Pod not found'}); }
-  if (url.pathname === '/' || url.pathname === '/index.html') return send(res, 200, fs.readFileSync(path.join(root, 'index.html')), 'text/html');
-  return send(res, 404, {error:'Not found'});
+function execKubectl(context, args, options = {}) {
+  return new Promise((resolve, reject) => execFile(kubectl, ['--context', context, ...args], { maxBuffer: 16 * 1024 * 1024, ...options }, (error, stdout, stderr) => error ? reject(new Error(stderr || error.message)) : resolve(stdout)));
 }
-http.createServer(route).listen(port, () => console.log(`Northstar running at http://localhost:${port} (simulated cluster)`));
+async function json(context, args) { return JSON.parse(await execKubectl(context, args)); }
+function send(res, status, body, type = 'application/json') { res.writeHead(status, { 'Content-Type': `${type}; charset=utf-8`, 'Cache-Control': 'no-store' }); res.end(type === 'application/json' ? JSON.stringify(body) : body); }
+function body(req) { return new Promise(resolve => { let data = ''; req.on('data', x => data += x); req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch { resolve({}); } }); }); }
+function age(date) { if (!date) return '—'; const mins = Math.max(1, Math.floor((Date.now() - new Date(date).getTime()) / 60000)); return mins < 60 ? `${mins}m` : mins < 1440 ? `${Math.floor(mins / 60)}h` : `${Math.floor(mins / 1440)}d`; }
+function normalizePod(p) { return { name:p.metadata.name, namespace:p.metadata.namespace, status:p.status.phase || 'Unknown', usage:'— / —', restarts:(p.status.containerStatuses || []).reduce((n,c) => n + c.restartCount, 0), age:age(p.metadata.creationTimestamp), node:p.spec.nodeName || '—', image:(p.spec.containers || []).map(c => c.image).join(', '), cpu:0, memory:0, containers:(p.spec.containers || []).map(c => c.name) }; }
+function filterItems(items, url) { const ns = url.searchParams.get('namespace'), q = (url.searchParams.get('q') || '').toLowerCase(); return items.filter(x => (!ns || ns === 'all' || x.namespace === ns) && (!q || JSON.stringify(x).toLowerCase().includes(q))); }
+async function contexts() { try { const names = await new Promise((resolve,reject)=>execFile(kubectl,['config','get-contexts','-o','name'],{maxBuffer:1024*1024},(error,stdout,stderr)=>error?reject(new Error(stderr||error.message)):resolve(stdout)); return names.trim().split('\n').filter(Boolean).map(name => ({ name, cluster:name, environment:name.includes('prod') ? 'Production' : name.includes('stage') ? 'Staging' : 'Development', connected:true })); } catch { return simulatedContexts.map(x => ({ ...x, connected:false, mode:'simulated' })); } }
+async function k8sPods(context) { return (await json(context, ['get','pods','-A','-o','json'])).items.map(normalizePod); }
+async function k8sMetrics(context) { try { const podTop = await execKubectl(context, ['top','pods','-A','--no-headers']); const rows = podTop.trim().split('\n').filter(Boolean).map(line => { const [namespace,name,cpu,memory] = line.trim().split(/\s+/); return { namespace,name,cpu,memory }; }); return { available:true, pods:rows }; } catch { return { available:false, pods:[] }; } }
+function fakePodObjects(context) { const scale = context === 'dev-sandbox' ? 0.65 : context === 'staging-west' ? 0.82 : 1; return fakePods.slice(0, Math.max(3, Math.round(fakePods.length * scale))).map((p,i) => ({ name:context === 'production-east' ? p[0] : `${p[0].split('-')[0]}-${context.slice(0,3)}-${i+1}`, namespace:context === 'production-east' ? p[1] : (context === 'staging-west' ? (i === 2 ? 'preview' : 'northstar') : (i === 2 ? 'feature-flags' : 'northstar')), status:context === 'dev-sandbox' && i === 2 ? 'CrashLoopBackOff' : p[2], usage:p[3], restarts:p[4], age:p[5], node:`${context}-node-${(i % simulated[context].nodes) + 1}`, image:p[7], cpu:Math.round(p[8] * scale), memory:Math.round(p[9] * scale), containers:['app'] })); }
+function fakeWorkloads(context) { return simulated[context].workloads.map(([kind,name,namespace,desired,ready], i) => ({ kind,name,namespace,desired,ready,updated:`${i + 2}m ago`, strategy:kind === 'Deployment' ? 'RollingUpdate' : 'OnDelete' })); }
+async function route(req, res) {
+  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`); const context = url.searchParams.get('context') || defaultContext;
+  try {
+    if (url.pathname === '/api/contexts') return send(res, 200, await contexts());
+    if (url.pathname === '/api/cluster') { const ps = process.env.NORTHSTAR_MODE === 'kubernetes' ? await k8sPods(context) : fakePodObjects(context), m = process.env.NORTHSTAR_MODE === 'kubernetes' ? await k8sMetrics(context) : {available:true,pods:[]}; return send(res, 200, { name:context, mode:process.env.NORTHSTAR_MODE === 'kubernetes' ? 'kubernetes' : 'simulated', version:process.env.NORTHSTAR_MODE === 'kubernetes' ? 'live' : 'simulated', health:ps.length ? Math.round(ps.filter(p=>p.status==='Running').length / ps.length * 1000) / 10 : 0, runningPods:ps.filter(p=>p.status==='Running').length, totalPods:ps.length, cpu:m.available ? 42.8 : null, alerts:ps.filter(p=>p.status!=='Running').length, metricsAvailable:m.available }); }
+    if (url.pathname === '/api/namespaces') { if (process.env.NORTHSTAR_MODE === 'kubernetes') return send(res, 200, (await json(context,['get','namespaces','-o','json'])).items.map(x=>x.metadata.name)); return send(res, 200, simulated[context]?.namespaces || []); }
+    if (url.pathname === '/api/pods') { const items = process.env.NORTHSTAR_MODE === 'kubernetes' ? await k8sPods(context) : fakePodObjects(context); return send(res, 200, filterItems(items,url)); }
+    const podLogs = url.pathname.match(/^\/api\/pods\/([^/]+)\/([^/]+)\/logs$/);
+    if (podLogs) { const namespace = decodeURIComponent(podLogs[1]), name = decodeURIComponent(podLogs[2]); if (process.env.NORTHSTAR_MODE === 'kubernetes') { const text = await execKubectl(context,['logs',`-n`,namespace,`pod/${name}`,'--all-containers=true','--tail=100']); return send(res,200,text.trim().split('\n').filter(Boolean).map((message,i)=>({time:`live ${i+1}`,level:'INFO',message}))); } return send(res,200,fakeLogs.map((message,i)=>({time:`11:${25+i}`,level:i===4?'WARN':'INFO',message}))); }
+    const podDetail = url.pathname.match(/^\/api\/pods\/([^/]+)\/([^/]+)$/);
+    if (podDetail) { const namespace=decodeURIComponent(podDetail[1]), name=decodeURIComponent(podDetail[2]); const list=process.env.NORTHSTAR_MODE === 'kubernetes' ? await k8sPods(context) : fakePodObjects(context); return send(res,list.find(p=>p.name===name&&p.namespace===namespace) ? 200 : 404,list.find(p=>p.name===name&&p.namespace===namespace) || {error:'Pod not found'}); }
+    if (url.pathname === '/api/workloads') { if (process.env.NORTHSTAR_MODE === 'kubernetes') { const [d,s,ds,j,c] = await Promise.all(['deployments','statefulsets','daemonsets','jobs','cronjobs'].map(kind=>json(context,['get',kind,'-A','-o','json']))); const all=[...d.items.map(x=>({...x,kind:'Deployment'})),...s.items.map(x=>({...x,kind:'StatefulSet'})),...ds.items.map(x=>({...x,kind:'DaemonSet'})),...j.items.map(x=>({...x,kind:'Job'})),...c.items.map(x=>({...x,kind:'CronJob'}))].map(x=>({kind:x.kind,name:x.metadata.name,namespace:x.metadata.namespace,desired:x.spec.replicas ?? x.status.desired ?? 1,ready:x.status.readyReplicas ?? x.status.succeeded ?? x.status.numberReady ?? 0,updated:age(x.metadata.creationTimestamp)+' ago',strategy:x.spec.strategy?.type || '—'})); return send(res,200,filterItems(all,url)); } return send(res,200,filterItems(fakeWorkloads(context),url)); }
+    if (url.pathname === '/api/nodes') { if (process.env.NORTHSTAR_MODE === 'kubernetes') { const data=await json(context,['get','nodes','-o','json']); return send(res,200,data.items.map(n=>({name:n.metadata.name,status:(n.status.conditions||[]).find(x=>x.type==='Ready')?.status==='True'?'Ready':'NotReady',roles:Object.keys(n.metadata.labels||{}).filter(x=>x.startsWith('node-role.kubernetes.io/')).map(x=>x.split('/')[1]),version:n.status.nodeInfo?.kubeletVersion,capacity:n.status.capacity,conditions:(n.status.conditions||[]).filter(x=>['Ready','MemoryPressure','DiskPressure','PIDPressure'].includes(x.type)).map(x=>({type:x.type,status:x.status,reason:x.reason}))}))); } return send(res,200,Array.from({length:simulated[context].nodes},(_,i)=>({name:`${context}-node-${i+1}`,status:'Ready',roles:i===0?['control-plane']:['worker'],version:'simulated',capacity:{cpu:'4',memory:'8Gi'},conditions:[{type:'Ready',status:'True'}]}))); }
+    if (url.pathname === '/api/events') { if (process.env.NORTHSTAR_MODE === 'kubernetes') { const data=await json(context,['get','events','-A','--sort-by=.lastTimestamp','-o','json']); return send(res,200,data.items.slice(-100).reverse().map(e=>({namespace:e.metadata.namespace,type:e.type,reason:e.reason,message:e.message,object:e.involvedObject?.name,time:e.lastTimestamp||e.eventTime||e.metadata.creationTimestamp}))); } return send(res,200,[{namespace:'northstar',type:'Normal',reason:'DeploymentRolledOut',message:context==='dev-sandbox'?'feature-preview has an unavailable replica':'payments-api replicas are ready',object:'payments-api',time:new Date().toISOString()},{namespace:'northstar',type:'Warning',reason:'BackOff',message:context==='dev-sandbox'?'feature-preview container is restarting':'checkout-worker restarted once',object:'feature-preview',time:new Date(Date.now()-300000).toISOString()}]); }
+    if (url.pathname === '/api/alerts') { const events = process.env.NORTHSTAR_MODE === 'kubernetes' ? (await json(context,['get','events','-A','-o','json'])).items : []; return send(res,200,events.filter(e=>e.type==='Warning').slice(-20).map(e=>({severity:'warning',title:e.reason,description:e.message,namespace:e.metadata.namespace}))); }
+    if (url.pathname === '/api/dashboards' && req.method === 'GET') { let dashboards=[]; try { dashboards=JSON.parse(fs.readFileSync(dashboardFile,'utf8')); } catch {} return send(res,200,dashboards); }
+    if (url.pathname === '/api/dashboards' && req.method === 'POST') { const data=await body(req); let dashboards=[]; try { dashboards=JSON.parse(fs.readFileSync(dashboardFile,'utf8')); } catch {} const dashboard={id:Date.now().toString(),name:data.name||'Untitled dashboard',context:data.context||context,widgets:data.widgets||['pod-health','resource-usage','events'],createdAt:new Date().toISOString()}; dashboards.push(dashboard); fs.writeFileSync(dashboardFile,JSON.stringify(dashboards,null,2)); return send(res,201,dashboard); }
+    if (url.pathname === '/api/actions' && req.method === 'POST') { const a=await body(req); if (process.env.NORTHSTAR_MODE !== 'kubernetes') return send(res,200,{ok:true,simulated:true,message:`${a.action} simulated for ${a.name}`}); const ns=a.namespace, name=a.name, kind=(a.kind||'deployment').toLowerCase(); if (a.action==='rollout-restart') await execKubectl(context,['rollout','restart',`${kind}/${name}`,'-n',ns]); else if (a.action==='scale') await execKubectl(context,['scale',`${kind}/${name}`,'-n',ns,`--replicas=${Math.max(0,Math.min(20,Number(a.replicas)||1))}`]); else if (a.action==='delete') await execKubectl(context,['delete',kind,name,'-n',ns]); else return send(res,400,{error:'Unsupported action'}); return send(res,200,{ok:true,message:`${a.action} sent to ${name}`}); }
+    if (url.pathname === '/api/exec' && req.method === 'POST') { const a=await body(req); const command=String(a.command||'').trim(); if (!command || command.length>300 || /[;&|`$<>]/.test(command)) return send(res,400,{error:'Use one safe command without shell operators'}); if (process.env.NORTHSTAR_MODE !== 'kubernetes') return send(res,200,{output:`$ ${command}\n(simulated shell)\nNorthstar demo container is healthy.`}); const output=await execKubectl(context,['exec','-n',a.namespace,`pod/${a.name}`,'-c',a.container||'app','--','/bin/sh','-c',command]); return send(res,200,{output}); }
+    if (url.pathname === '/' || url.pathname === '/index.html') return send(res,200,fs.readFileSync(path.join(root,'index.html')),'text/html');
+    return send(res,404,{error:'Not found'});
+  } catch (e) { return send(res,503,{error:e.message,context}); }
+}
+http.createServer(route).listen(port,()=>console.log(`Northstar running at http://localhost:${port} (${process.env.NORTHSTAR_MODE === 'kubernetes' ? 'kubernetes' : 'simulated'} mode)`));
