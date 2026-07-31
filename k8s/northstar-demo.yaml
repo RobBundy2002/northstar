@@ -1,0 +1,79 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: northstar
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments-api
+  namespace: northstar
+  labels: { app: payments-api }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: payments-api } }
+  template:
+    metadata: { labels: { app: payments-api } }
+    spec:
+      containers:
+        - name: api
+          image: hashicorp/http-echo:1.0.0
+          args: ["-text=payments-api is healthy"]
+          ports: [{ containerPort: 5678 }]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 100m, memory: 64Mi }
+          readinessProbe:
+            httpGet: { path: /, port: 5678 }
+            initialDelaySeconds: 2
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-worker
+  namespace: northstar
+  labels: { app: checkout-worker }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: checkout-worker } }
+  template:
+    metadata: { labels: { app: checkout-worker } }
+    spec:
+      containers:
+        - name: worker
+          image: busybox:1.36
+          command: ["/bin/sh", "-c"]
+          args: ["i=0; while true; do i=$((i+1)); echo checkout-worker processed batch=$i; sleep 8; done"]
+          resources:
+            requests: { cpu: 10m, memory: 8Mi }
+            limits: { cpu: 100m, memory: 32Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: billing-sync
+  namespace: northstar
+  labels: { app: billing-sync }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: billing-sync } }
+  template:
+    metadata: { labels: { app: billing-sync } }
+    spec:
+      containers:
+        - name: sync
+          image: busybox:1.36
+          command: ["/bin/sh", "-c"]
+          args: ["while true; do echo billing-sync heartbeat; sleep 12; done"]
+          resources:
+            requests: { cpu: 10m, memory: 8Mi }
+            limits: { cpu: 100m, memory: 32Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payments-api
+  namespace: northstar
+spec:
+  selector: { app: payments-api }
+  ports: [{ port: 80, targetPort: 5678 }]
