@@ -1,0 +1,20 @@
+services:
+  northstar:
+    build: .
+    ports:
+      - "${PORT:-5173}:5173"
+    environment:
+      NORTHSTAR_MODE: ${NORTHSTAR_MODE:-kubernetes}
+      NORTHSTAR_CONTEXT: ${NORTHSTAR_CONTEXT:-production-east}
+      NORTHSTAR_KUBECONFIG: /kube/config
+      NORTHSTAR_PROMETHEUS_URL: http://prometheus:9090
+    volumes:
+      - ${NORTHSTAR_KUBECONFIG_PATH:-./kubeconfig}:/kube/config:ro
+    depends_on:
+      - prometheus
+  prometheus:
+    image: prom/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus.docker.yml:/etc/prometheus/prometheus.yml:ro

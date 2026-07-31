@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "northstar.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "northstar.name" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "northstar.name" . }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "northstar.name" . }}
+    spec:
+      serviceAccountName: {{ .Values.rbac.serviceAccountName }}
+      containers:
+        - name: northstar
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 5173
+          env:
+            - name: NORTHSTAR_MODE
+              value: kubernetes
+            - name: NORTHSTAR_CONTEXT
+              value: {{ .Values.context | quote }}
+            - name: NORTHSTAR_KUBECONFIG
+              value: /kube/config
+            - name: NORTHSTAR_PROMETHEUS_URL
+              value: {{ .Values.prometheusUrl | quote }}
+          volumeMounts:
+            - name: kubeconfig
+              mountPath: /kube
+              readOnly: true
+      volumes:
+        - name: kubeconfig
+          secret:
+            secretName: {{ .Values.kubeconfigSecret }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "northstar.fullname" . }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app.kubernetes.io/name: {{ include "northstar.name" . }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http

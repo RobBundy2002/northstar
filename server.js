@@ -9,6 +9,7 @@ const root = __dirname;
 const kubectl = process.env.NORTHSTAR_KUBECTL || 'kubectl';
 const defaultContext = process.env.NORTHSTAR_CONTEXT || 'production-east';
 const prometheusUrl = process.env.NORTHSTAR_PROMETHEUS_URL || '';
+const kubeconfig = process.env.NORTHSTAR_KUBECONFIG || process.env.KUBECONFIG || '';
 const dashboardFile = path.join(root, 'dashboards.json');
 
 const simulatedContexts = [
@@ -27,7 +28,8 @@ const fakePods = [
 const fakeLogs = ['request completed method=GET path=/v1/orders duration=42ms','reconciled deployment replicas=3 ready=3','cache hit key=customer:88421 ttl=240s','health check passed component=postgres','request completed method=POST path=/v1/charge duration=118ms','connection pool active=12 idle=8'];
 
 function execKubectl(context, args, options = {}) {
-  return new Promise((resolve, reject) => execFile(kubectl, ['--context', context, ...args], { maxBuffer: 16 * 1024 * 1024, ...options }, (error, stdout, stderr) => error ? reject(new Error(stderr || error.message)) : resolve(stdout)));
+  const env = { ...process.env, ...(kubeconfig ? { KUBECONFIG:kubeconfig } : {}) };
+  return new Promise((resolve, reject) => execFile(kubectl, ['--context', context, ...args], { maxBuffer: 16 * 1024 * 1024, env, ...options }, (error, stdout, stderr) => error ? reject(new Error(stderr || error.message)) : resolve(stdout)));
 }
 async function json(context, args) { return JSON.parse(await execKubectl(context, args)); }
 function send(res, status, body, type = 'application/json') { res.writeHead(status, { 'Content-Type': `${type}; charset=utf-8`, 'Cache-Control': 'no-store' }); res.end(type === 'application/json' ? JSON.stringify(body) : body); }
@@ -42,7 +44,7 @@ async function metricsText(context) { let ps,m; if (process.env.NORTHSTAR_MODE =
 async function contexts() {
   try {
     const names = await new Promise((resolve, reject) => {
-      execFile(kubectl, ['config', 'get-contexts', '-o', 'name'], { maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+      execFile(kubectl, ['config', 'get-contexts', '-o', 'name'], { maxBuffer: 1024 * 1024, env:{...process.env,...(kubeconfig?{KUBECONFIG:kubeconfig}:{})} }, (error, stdout, stderr) => {
         if (error) reject(new Error(stderr || error.message));
         else resolve(stdout);
       });

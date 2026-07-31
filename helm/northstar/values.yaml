@@ -1,0 +1,14 @@
+replicaCount: 1
+image:
+  repository: northstar
+  tag: latest
+  pullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+  port: 5173
+context: production-east
+prometheusUrl: ""
+kubeconfigSecret: northstar-kubeconfig
+rbac:
+  create: true
+  serviceAccountName: northstar
