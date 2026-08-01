@@ -199,7 +199,7 @@ The root `index.html` includes a static demo mode for GitHub Pages. It detects t
 
 To publish it:
 
-1. Push the repository to GitHub with the default branch named `main`.
+1. Push the repository to GitHub on the `main-1` branch.
 2. In **Settings → Pages**, set the source to **GitHub Actions**.
 3. Push to `main` or run **Deploy Northstar demo to GitHub Pages** from the Actions tab.
 
