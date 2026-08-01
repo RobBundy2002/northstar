@@ -17,13 +17,14 @@ const dashboardFile = path.join(dataDir, 'dashboards.json');
 const auditFile = path.join(dataDir, 'audit.jsonl');
 const userFile = path.join(dataDir, 'users.json');
 const sessionFile = path.join(dataDir, 'sessions.json');
+const metricsFile = path.join(dataDir, 'metrics.json');
 const readOnly = /^(1|true|yes|on)$/i.test(process.env.NORTHSTAR_READ_ONLY || '');
 const portForwards = new Map();
 
 const builtInDashboards = [
-  { id:'builtin-cluster-overview', builtin:true, name:'Cluster Overview', context:'all', widgets:['cluster-health','pod-health','resource-usage','events'], layout:'grafana', createdAt:'builtin' },
-  { id:'builtin-workload-health', builtin:true, name:'Workload Health', context:'all', widgets:['workload-readiness','restarts','logs','events'], layout:'grafana', createdAt:'builtin' },
-  { id:'builtin-observability', builtin:true, name:'Observability Signals', context:'all', widgets:['prometheus','alerts','logs','timeline'], layout:'grafana', createdAt:'builtin' },
+  { id:'builtin-cluster-overview', builtin:true, name:'Cluster Overview', context:'all', widgets:['cpu','memory','runningPods','warningEvents'], layout:'grafana', createdAt:'builtin' },
+  { id:'builtin-workload-health', builtin:true, name:'Workload Health', context:'all', widgets:['readyWorkloads','restarts','failedPods','logLines'], layout:'grafana', createdAt:'builtin' },
+  { id:'builtin-observability', builtin:true, name:'Observability Signals', context:'all', widgets:['logLines','warningEvents','restarts','cpu'], layout:'grafana', createdAt:'builtin' },
 ];
 
 const simulatedContexts = [
@@ -58,9 +59,26 @@ function verifyPassword(password, stored) { const [salt,hash] = String(stored ||
 function currentUser(req) { const sid=parseCookies(req).northstar_session; if (!sid) return null; const sessions=readJson(sessionFile, {}); const session=sessions[sid]; if (!session || new Date(session.expiresAt).getTime() < Date.now()) return null; return readJson(userFile, []).find(u=>u.id===session.userId) || null; }
 function setSession(res, user) { const sid=crypto.randomBytes(24).toString('hex'); const sessions=readJson(sessionFile, {}); sessions[sid]={ userId:user.id, createdAt:new Date().toISOString(), expiresAt:new Date(Date.now()+1000*60*60*24*14).toISOString() }; writeJson(sessionFile, sessions); res.setHeader('Set-Cookie', `northstar_session=${encodeURIComponent(sid)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=1209600`); }
 function clearSession(req, res) { const sid=parseCookies(req).northstar_session; if (sid) { const sessions=readJson(sessionFile, {}); delete sessions[sid]; writeJson(sessionFile, sessions); } res.setHeader('Set-Cookie', 'northstar_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0'); }
+function normalizeDashboard(d) {
+  const aliases = {
+    'cluster-health':['cpu','memory'],
+    'pod-health':['runningPods','failedPods'],
+    'resource-usage':['cpu','memory','podCpuMillicores','podMemoryMi'],
+    'events':['warningEvents'],
+    'workload-readiness':['readyWorkloads'],
+    'logs':['logLines'],
+    'alerts':['warningEvents'],
+    'prometheus':['cpu','memory'],
+    'timeline':['warningEvents','restarts'],
+  };
+  const widgets = [...new Set((d.widgets||[]).flatMap(w=>aliases[w]||[w]))].slice(0,6);
+  return { ...d, widgets };
+}
 function age(date) { if (!date) return '—'; const mins = Math.max(1, Math.floor((Date.now() - new Date(date).getTime()) / 60000)); return mins < 60 ? `${mins}m` : mins < 1440 ? `${Math.floor(mins / 60)}h` : `${Math.floor(mins / 1440)}d`; }
 function normalizePod(p) { const owner=(p.metadata.ownerReferences||[])[0]; return { name:p.metadata.name, namespace:p.metadata.namespace, status:p.status.phase || 'Unknown', usage:'— / —', restarts:(p.status.containerStatuses || []).reduce((n,c) => n + c.restartCount, 0), age:age(p.metadata.creationTimestamp), node:p.spec.nodeName || '—', image:(p.spec.containers || []).map(c => c.image).join(', '), cpu:0, memory:0, containers:(p.spec.containers || []).map(c => c.name), ownerKind:owner?.kind?.toLowerCase() || '', ownerName:owner?.name || '' }; }
 function filterItems(items, url) { const ns = url.searchParams.get('namespace'), q = (url.searchParams.get('q') || '').toLowerCase(); return items.filter(x => (!ns || ns === 'all' || x.namespace === ns) && (!q || JSON.stringify(x).toLowerCase().includes(q))); }
+function parseCpu(value) { const s=String(value||'0'); return s.endsWith('m') ? Number(s.slice(0,-1)) : Number(s) * 1000; }
+function parseMemoryMi(value) { const s=String(value||'0'); const n=parseFloat(s); if (s.endsWith('Ki')) return n / 1024; if (s.endsWith('Mi')) return n; if (s.endsWith('Gi')) return n * 1024; if (s.endsWith('Ti')) return n * 1024 * 1024; return n / 1024 / 1024; }
 function validResourcePart(value) { return typeof value === 'string' && /^[a-z0-9][a-z0-9.-]{0,62}$/.test(value); }
 function validApiResource(value) { return typeof value === 'string' && /^[a-z0-9./-]{1,120}$/.test(value); }
 function requireResource(a) { if (!validResourcePart(a.namespace) || !validResourcePart(a.name)) throw new Error('Invalid namespace or resource name'); }
@@ -166,6 +184,64 @@ async function k8sMetrics(context) { try { const [podTop,nodeTop] = await Promis
 function applyMetrics(pods, metrics) { const byName = new Map(metrics.pods.map(x => [`${x.namespace}/${x.name}`, x])); return pods.map(p => { const m=byName.get(`${p.namespace}/${p.name}`); return m ? { ...p, usage:`${m.cpu} / ${m.memory}` } : p; }); }
 function fakePodObjects(context) { const scale = context === 'dev-sandbox' ? 0.65 : context === 'staging-west' ? 0.82 : 1; return fakePods.slice(0, Math.max(3, Math.round(fakePods.length * scale))).map((p,i) => ({ name:context === 'production-east' ? p[0] : `${p[0].split('-')[0]}-${context.slice(0,3)}-${i+1}`, namespace:context === 'production-east' ? p[1] : (context === 'staging-west' ? (i === 2 ? 'preview' : 'northstar') : (i === 2 ? 'feature-flags' : 'northstar')), status:context === 'dev-sandbox' && i === 2 ? 'CrashLoopBackOff' : p[2], usage:p[3], restarts:p[4], age:p[5], node:`${context}-node-${(i % simulated[context].nodes) + 1}`, image:p[7], cpu:Math.round(p[8] * scale), memory:Math.round(p[9] * scale), containers:['app'] })); }
 function fakeWorkloads(context) { return simulated[context].workloads.map(([kind,name,namespace,desired,ready], i) => ({ kind,name,namespace,desired,ready,updated:`${i + 2}m ago`, strategy:kind === 'Deployment' ? 'RollingUpdate' : 'OnDelete' })); }
+async function countRecentLogs(context, pods, namespace) {
+  const targets = pods.filter(p=>!namespace||namespace==='all'||p.namespace===namespace).slice(0,8);
+  const counts = await Promise.all(targets.map(async p => {
+    try {
+      const text = await execKubectl(context, ['logs','-n',p.namespace,`pod/${p.name}`,'--all-containers=true','--since=5m','--tail=500']);
+      return text.trim().split('\n').filter(Boolean).length;
+    } catch { return 0; }
+  }));
+  return counts.reduce((n,x)=>n+x,0);
+}
+async function dashboardMetrics(context, namespace = 'all') {
+  let pods, workloads, metrics, warningEvents = 0;
+  if (process.env.NORTHSTAR_MODE === 'kubernetes') {
+    [pods, metrics] = await Promise.all([k8sPods(context), k8sMetrics(context)]);
+    workloads = await Promise.all(['deployments','statefulsets','daemonsets','jobs','cronjobs'].map(kind=>json(context,['get',kind,'-A','-o','json']).catch(()=>({items:[]}))));
+    const eventData = await json(context, ['get','events','-A','-o','json']).catch(()=>({items:[]}));
+    warningEvents = (eventData.items||[]).filter(e=>e.type==='Warning').length;
+  } else {
+    pods = fakePodObjects(context); metrics = { available:true, pods:[], clusterCpu:42.8, clusterMemory:61.8 }; workloads = [{items:fakeWorkloads(context).map(w=>({kind:w.kind,status:{readyReplicas:w.ready},spec:{replicas:w.desired}}))}]; warningEvents = pods.filter(p=>p.status!=='Running').length;
+  }
+  const scopedPods = pods.filter(p=>!namespace||namespace==='all'||p.namespace===namespace);
+  const workloadItems = workloads.flatMap(x=>x.items||[]);
+  const readyWorkloads = workloadItems.filter(w => (w.status?.readyReplicas ?? w.status?.numberReady ?? w.status?.succeeded ?? 0) >= (w.spec?.replicas ?? w.status?.desiredNumberScheduled ?? 1)).length;
+  const podMetricMap = new Map((metrics.pods||[]).map(m=>[`${m.namespace}/${m.name}`,m]));
+  const podCpuMillicores = scopedPods.reduce((n,p)=>n+parseCpu(podMetricMap.get(`${p.namespace}/${p.name}`)?.cpu),0);
+  const podMemoryMi = Math.round(scopedPods.reduce((n,p)=>n+parseMemoryMi(podMetricMap.get(`${p.namespace}/${p.name}`)?.memory),0));
+  const sample = {
+    time:new Date().toISOString(),
+    cpu:metrics.clusterCpu ?? null,
+    memory:metrics.clusterMemory ?? null,
+    podCpuMillicores,
+    podMemoryMi,
+    runningPods:scopedPods.filter(p=>p.status==='Running').length,
+    totalPods:scopedPods.length,
+    failedPods:scopedPods.filter(p=>p.status!=='Running').length,
+    restarts:scopedPods.reduce((n,p)=>n+(Number(p.restarts)||0),0),
+    readyWorkloads,
+    totalWorkloads:workloadItems.length,
+    warningEvents,
+    logLines:await countRecentLogs(context, scopedPods, namespace),
+  };
+  const all = readJson(metricsFile, {});
+  const key = `${context}:${namespace||'all'}`;
+  all[key] = [...(all[key]||[]), sample].slice(-240);
+  writeJson(metricsFile, all);
+  return { context, namespace, sample, series:all[key], signals:[
+    {key:'cpu',label:'Cluster CPU %',unit:'%',kind:'line'},
+    {key:'memory',label:'Cluster memory %',unit:'%',kind:'line'},
+    {key:'podCpuMillicores',label:'Pod CPU millicores',unit:'m',kind:'line'},
+    {key:'podMemoryMi',label:'Pod memory MiB',unit:'Mi',kind:'line'},
+    {key:'runningPods',label:'Running pods',unit:'pods',kind:'bar'},
+    {key:'failedPods',label:'Failed pods',unit:'pods',kind:'bar'},
+    {key:'restarts',label:'Restarts',unit:'count',kind:'bar'},
+    {key:'readyWorkloads',label:'Ready workloads',unit:'workloads',kind:'bar'},
+    {key:'warningEvents',label:'Warning events',unit:'events',kind:'bar'},
+    {key:'logLines',label:'Log lines in 5m',unit:'lines',kind:'bar'},
+  ]};
+}
 async function route(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`); const context = url.searchParams.get('context') || defaultContext;
   try {
@@ -206,6 +282,7 @@ async function route(req, res) {
     if (url.pathname === '/api/pods') { let items; if (process.env.NORTHSTAR_MODE === 'kubernetes') { const m=await k8sMetrics(context);items=applyMetrics(await k8sPods(context),m); } else items=fakePodObjects(context); return send(res, 200, filterItems(items,url)); }
     if (url.pathname === '/api/prometheus/status') return send(res,200,{configured:Boolean(prometheusUrl),url:prometheusUrl || null});
     if (url.pathname === '/api/prometheus/query') return send(res,200,await queryPrometheus(url.searchParams.get('query') || 'up'));
+    if (url.pathname === '/api/dashboard-metrics') return send(res,200,await dashboardMetrics(context,url.searchParams.get('namespace') || 'all'));
     const podStream = url.pathname.match(/^\/api\/pods\/([^/]+)\/([^/]+)\/logs\/stream$/);
     if (podStream) {
       const namespace=decodeURIComponent(podStream[1]), name=decodeURIComponent(podStream[2]);
@@ -222,8 +299,8 @@ async function route(req, res) {
     if (url.pathname === '/api/nodes') { if (process.env.NORTHSTAR_MODE === 'kubernetes') { const data=await json(context,['get','nodes','-o','json']); return send(res,200,data.items.map(n=>({name:n.metadata.name,status:(n.status.conditions||[]).find(x=>x.type==='Ready')?.status==='True'?'Ready':'NotReady',roles:Object.keys(n.metadata.labels||{}).filter(x=>x.startsWith('node-role.kubernetes.io/')).map(x=>x.split('/')[1]),version:n.status.nodeInfo?.kubeletVersion,capacity:n.status.capacity,conditions:(n.status.conditions||[]).filter(x=>['Ready','MemoryPressure','DiskPressure','PIDPressure'].includes(x.type)).map(x=>({type:x.type,status:x.status,reason:x.reason}))}))); } return send(res,200,Array.from({length:simulated[context].nodes},(_,i)=>({name:`${context}-node-${i+1}`,status:'Ready',roles:i===0?['control-plane']:['worker'],version:'simulated',capacity:{cpu:'4',memory:'8Gi'},conditions:[{type:'Ready',status:'True'}]}))); }
     if (url.pathname === '/api/events') { if (process.env.NORTHSTAR_MODE === 'kubernetes') { const data=await json(context,['get','events','-A','--sort-by=.lastTimestamp','-o','json']); return send(res,200,data.items.slice(-100).reverse().map(e=>({namespace:e.metadata.namespace,type:e.type,reason:e.reason,message:e.message,object:e.involvedObject?.name,time:e.lastTimestamp||e.eventTime||e.metadata.creationTimestamp}))); } return send(res,200,[{namespace:'northstar',type:'Normal',reason:'DeploymentRolledOut',message:context==='dev-sandbox'?'feature-preview has an unavailable replica':'payments-api replicas are ready',object:'payments-api',time:new Date().toISOString()},{namespace:'northstar',type:'Warning',reason:'BackOff',message:context==='dev-sandbox'?'feature-preview container is restarting':'checkout-worker restarted once',object:'feature-preview',time:new Date(Date.now()-300000).toISOString()}]); }
     if (url.pathname === '/api/alerts') { const events = process.env.NORTHSTAR_MODE === 'kubernetes' ? (await json(context,['get','events','-A','-o','json'])).items : []; return send(res,200,events.filter(e=>e.type==='Warning').slice(-20).map(e=>({severity:'warning',title:e.reason,description:e.message,namespace:e.metadata.namespace}))); }
-    if (url.pathname === '/api/dashboards' && req.method === 'GET') { const custom=readJson(dashboardFile, []).filter(d=>d.ownerId===user.id); return send(res,200,[...builtInDashboards,...custom]); }
-    if (url.pathname === '/api/dashboards' && req.method === 'POST') { const data=await body(req); const dashboards=readJson(dashboardFile, []); const dashboard={id:crypto.randomBytes(10).toString('hex'),ownerId:user.id,name:String(data.name||'Untitled dashboard').slice(0,80),context:data.context||context,widgets:Array.isArray(data.widgets)&&data.widgets.length?data.widgets:['pod-health','resource-usage','events'],layout:data.layout||'grafana',createdAt:new Date().toISOString()}; dashboards.push(dashboard); writeJson(dashboardFile,dashboards); return send(res,201,dashboard); }
+    if (url.pathname === '/api/dashboards' && req.method === 'GET') { const custom=readJson(dashboardFile, []).filter(d=>d.ownerId===user.id||!d.ownerId); return send(res,200,[...builtInDashboards,...custom].map(normalizeDashboard)); }
+    if (url.pathname === '/api/dashboards' && req.method === 'POST') { const data=await body(req); const allowed=new Set(['cpu','memory','podCpuMillicores','podMemoryMi','runningPods','failedPods','restarts','readyWorkloads','warningEvents','logLines']); const widgets=(Array.isArray(data.widgets)?data.widgets:[]).filter(w=>allowed.has(w)).slice(0,6); const dashboards=readJson(dashboardFile, []); const dashboard={id:crypto.randomBytes(10).toString('hex'),ownerId:user.id,name:String(data.name||'Untitled dashboard').slice(0,80),context:data.context||context,widgets:widgets.length?widgets:['cpu','memory','runningPods','warningEvents'],layout:data.layout||'grafana',createdAt:new Date().toISOString()}; dashboards.push(dashboard); writeJson(dashboardFile,dashboards); return send(res,201,dashboard); }
     if (url.pathname === '/api/audit') { let rows=[]; try { rows=fs.readFileSync(auditFile,'utf8').trim().split('\n').filter(Boolean).slice(-100).map(x=>JSON.parse(x)).reverse(); } catch {} return send(res,200,rows); }
     if (url.pathname === '/api/port-forwards' && req.method === 'GET') return send(res,200,[...portForwards.values()].map(({child,...x})=>x));
     if (url.pathname === '/api/port-forwards' && req.method === 'POST') {
