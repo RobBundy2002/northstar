@@ -10,7 +10,9 @@ const kubectl = process.env.NORTHSTAR_KUBECTL || 'kubectl';
 const defaultContext = process.env.NORTHSTAR_CONTEXT || 'production-east';
 const prometheusUrl = process.env.NORTHSTAR_PROMETHEUS_URL || '';
 const kubeconfig = process.env.NORTHSTAR_KUBECONFIG || process.env.KUBECONFIG || '';
-const dashboardFile = path.join(root, 'dashboards.json');
+const dataDir = process.env.NORTHSTAR_DATA_DIR || path.join(root, 'data');
+fs.mkdirSync(dataDir, { recursive: true });
+const dashboardFile = path.join(dataDir, 'dashboards.json');
 const readOnly = /^(1|true|yes|on)$/i.test(process.env.NORTHSTAR_READ_ONLY || '');
 const portForwards = new Map();
 

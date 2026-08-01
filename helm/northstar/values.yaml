@@ -10,6 +10,12 @@ context: production-east
 readOnly: true
 prometheusUrl: ""
 kubeconfigSecret: northstar-kubeconfig
+persistence:
+  enabled: true
+  size: 1Gi
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
 rbac:
   create: true
   mode: readonly

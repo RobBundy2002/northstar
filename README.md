@@ -64,6 +64,23 @@ docker compose up --build
 
 Open `http://localhost:5173`.
 
+Both Northstar dashboard data and Prometheus time-series data are stored in named Docker volumes, so they survive container restarts and image rebuilds. The `northstar` service is intentionally bound to `127.0.0.1`; put it behind an authenticated HTTPS reverse proxy such as Caddy or Nginx when hosting it on a server.
+
+For a persistent server deployment:
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs -f northstar
+```
+
+Docker's `restart: unless-stopped` policy starts both services again after a host reboot. Back up the volumes periodically:
+
+```bash
+docker run --rm -v untitled1_northstar-data:/data -v "$PWD":/backup alpine \
+  tar czf /backup/northstar-data-backup.tgz -C /data .
+```
+
 The Compose setup starts Northstar and Prometheus. It is intended for localhost or a private network; do not expose the operator endpoint publicly without authentication and a restricted RBAC profile.
 
 If the target cluster already has Prometheus, set `NORTHSTAR_COMPOSE_PROMETHEUS_URL` in `.env`. Otherwise the bundled Prometheus scrapes Northstar's `/metrics` endpoint.
@@ -101,6 +118,16 @@ kubectl --context my-real-context top nodes
 
 `kubectl top` requires Metrics Server in the target cluster. Northstar still works without it, but CPU and memory cards show `N/A`.
 
+If local kind or minikube clusters publish their API servers on `127.0.0.1`, containers need the Docker host gateway instead. Set `NORTHSTAR_KUBECONFIG_SERVER_HOST=host.docker.internal` in `.env`; Northstar will create a temporary rewritten kubeconfig inside the container while preserving the original kubeconfig read-only.
+
+If those local clusters listen only on host loopback, use the host-network override instead:
+
+```bash
+docker-compose -f docker-compose.kind.yml up -d --build
+```
+
+This override is for local kind/minikube only. Use the regular Compose file for a VPS or remote Kubernetes APIs.
+
 ## RBAC Profiles
 
 For a cluster-managed ServiceAccount, start with read-only access:
@@ -136,6 +163,8 @@ helm upgrade --install northstar ./helm/northstar \
   --set readOnly=true \
   --set rbac.mode=readonly
 ```
+
+The Helm deployment creates a PersistentVolumeClaim for dashboard data by default. Configure `persistence.size` and `persistence.storageClass` for the storage class in your cluster.
 
 To allow operator actions through Helm, make both settings explicit:
 
