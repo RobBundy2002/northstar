@@ -14,7 +14,7 @@ services:
       NORTHSTAR_DATA_DIR: /app/data
       NORTHSTAR_PROMETHEUS_URL: ${NORTHSTAR_COMPOSE_PROMETHEUS_URL:-http://prometheus:9090}
     volumes:
-      - ${NORTHSTAR_KUBECONFIG_PATH}:/kube/config:ro
+      - ${NORTHSTAR_KUBECONFIG_PATH:-${HOME}/.kube/config}:/kube/config:ro
       - northstar-data:/app/data
     depends_on:
       prometheus:
