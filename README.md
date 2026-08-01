@@ -189,3 +189,18 @@ npm run start:all
 ```
 
 If port 5173 or 9090 is already occupied, Northstar automatically selects the next available port and updates its Prometheus scrape target.
+# Northstar
+
+Northstar is a dark, context-aware Kubernetes cockpit mockup.
+
+## GitHub Pages demo
+
+The root `index.html` includes a static demo mode for GitHub Pages. It detects that no Northstar API is available and supplies simulated clusters, pods, workloads, events, logs, resources, and dashboards in the browser.
+
+To publish it:
+
+1. Push the repository to GitHub with the default branch named `main`.
+2. In **Settings → Pages**, set the source to **GitHub Actions**.
+3. Push to `main` or run **Deploy Northstar demo to GitHub Pages** from the Actions tab.
+
+When run locally with `npm start`, the page continues to use the real Node API in `server.js`.
