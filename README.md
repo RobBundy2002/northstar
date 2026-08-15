@@ -2,6 +2,36 @@
 
 Northstar is a browser-based Kubernetes operations cockpit for contexts, namespaces, pods, workloads, nodes, events, logs, actions, Metrics Server, and Prometheus.
 
+[![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088ff)](.github/workflows/ci.yml) [![Demo](https://img.shields.io/badge/demo-GitHub%20Pages-63d5d4)](#demo)
+
+![Northstar overview](docs/screenshots/overview.png)
+
+Northstar gives operators a calm, context-aware view of live and simulated Kubernetes environments. Browse the [incident timeline](docs/screenshots/incident-timeline.png) and [multi-cluster dashboard](docs/screenshots/multi-cluster.png) screenshots, or launch the demo locally in one command.
+
+## Demo
+
+No cluster or kubeconfig is required:
+
+```bash
+docker compose -f docker-compose.demo.yml up --build
+```
+
+Then open `http://localhost:5173`. The full demo setup, sample cluster, and teardown instructions live in [docs/demo.md](docs/demo.md).
+
+![Incident timeline](docs/screenshots/incident-timeline.png)
+
+![Multi-cluster dashboard](docs/screenshots/multi-cluster.png)
+
+## Project guide
+
+- [Architecture](docs/architecture.md)
+- [RBAC examples](docs/rbac.md)
+- [Contributing](CONTRIBUTING.md)
+- [Roadmap](ROADMAP.md)
+- [Changelog](CHANGELOG.md)
+
+Run `npm run check` for linting and automated API tests. GitHub Actions runs validation, container builds, and Trivy security scanning on every push and pull request; version tags (`v1.2.3`) publish a GitHub release and GHCR image.
+
 ## What Northstar Provides
 
 - Command palette with `Cmd+K` / `Ctrl+K`
@@ -189,10 +219,6 @@ npm run start:all
 ```
 
 If port 5173 or 9090 is already occupied, Northstar automatically selects the next available port and updates its Prometheus scrape target.
-# Northstar
-
-Northstar is a dark, context-aware Kubernetes cockpit mockup.
-
 ## GitHub Pages demo
 
 The root `index.html` includes a static demo mode for GitHub Pages. It detects that no Northstar API is available and supplies simulated clusters, pods, workloads, events, logs, resources, and dashboards in the browser.
