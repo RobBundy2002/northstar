@@ -1,0 +1,27 @@
+services:
+  northstar:
+    build: .
+    ports:
+      - "127.0.0.1:${PORT:-5173}:5173"
+    environment:
+      NORTHSTAR_MODE: simulated
+      NORTHSTAR_CONTEXT: production-east
+      NORTHSTAR_READ_ONLY: "false"
+      NORTHSTAR_DATA_DIR: /app/data
+      NORTHSTAR_PROMETHEUS_URL: http://prometheus:9090
+    volumes:
+      - northstar-demo-data:/app/data
+    depends_on:
+      prometheus:
+        condition: service_started
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus.docker.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-demo-data:/prometheus
+
+volumes:
+  northstar-demo-data:
+  prometheus-demo-data:

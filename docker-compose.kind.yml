@@ -1,0 +1,33 @@
+# Standalone local-only Compose file for kind/minikube clusters whose API
+# servers listen on 127.0.0.1 on the Docker host.
+services:
+  northstar:
+    build: .
+    network_mode: host
+    environment:
+      NORTHSTAR_MODE: ${NORTHSTAR_MODE:-kubernetes}
+      NORTHSTAR_CONTEXT: ${NORTHSTAR_CONTEXT:-production-east}
+      NORTHSTAR_READ_ONLY: ${NORTHSTAR_READ_ONLY:-true}
+      NORTHSTAR_KUBECONFIG: /kube/config
+      NORTHSTAR_DATA_DIR: /app/data
+      NORTHSTAR_PROMETHEUS_URL: http://127.0.0.1:9090
+      NORTHSTAR_KUBECONFIG_SERVER_HOST: ""
+    volumes:
+      - ${NORTHSTAR_KUBECONFIG_PATH}:/kube/config:ro
+      - northstar-data:/app/data
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus.docker.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    restart: unless-stopped
+
+volumes:
+  northstar-data:
+  prometheus-data:

@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Lint → Test → Build → Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Lint
+        run: npm run lint
+      - name: Test
+        run: npm test
+      - name: Build application image
+        run: docker build --tag northstar:ci .
+      - name: Security scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: northstar:ci
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true

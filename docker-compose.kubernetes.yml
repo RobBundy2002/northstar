@@ -1,0 +1,33 @@
+# Real-cluster handoff. Use this file only with an explicitly scoped kubeconfig.
+services:
+  northstar:
+    build: .
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:${PORT:-5173}:5173"
+    environment:
+      NORTHSTAR_MODE: ${NORTHSTAR_MODE:-kubernetes}
+      NORTHSTAR_CONTEXT: ${NORTHSTAR_CONTEXT:-production-east}
+      NORTHSTAR_READ_ONLY: ${NORTHSTAR_READ_ONLY:-true}
+      NORTHSTAR_KUBECONFIG: /kube/config
+      NORTHSTAR_KUBECONFIG_SERVER_HOST: ${NORTHSTAR_KUBECONFIG_SERVER_HOST:-}
+      NORTHSTAR_DATA_DIR: /app/data
+      NORTHSTAR_PROMETHEUS_URL: ${NORTHSTAR_COMPOSE_PROMETHEUS_URL:-http://prometheus:9090}
+    volumes:
+      - ${NORTHSTAR_KUBECONFIG_PATH}:/kube/config:ro
+      - northstar-data:/app/data
+    depends_on:
+      prometheus:
+        condition: service_started
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus.docker.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+volumes:
+  northstar-data:
+  prometheus-data:
