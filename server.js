@@ -35,7 +35,8 @@ const fakeLogs = ['request completed method=GET path=/v1/orders duration=42ms','
 
 function execKubectl(context, args, options = {}) {
   const env = { ...process.env, ...(kubeconfig ? { KUBECONFIG:kubeconfig } : {}) };
-  return new Promise((resolve, reject) => execFile(kubectl, ['--context', context, ...args], { maxBuffer: 16 * 1024 * 1024, env, ...options }, (error, stdout, stderr) => error ? reject(new Error(stderr || error.message)) : resolve(stdout)));
+  const contextArgs = kubeconfig ? ['--context', context] : [];
+  return new Promise((resolve, reject) => execFile(kubectl, [...contextArgs, ...args], { maxBuffer: 16 * 1024 * 1024, env, ...options }, (error, stdout, stderr) => error ? reject(new Error(stderr || error.message)) : resolve(stdout)));
 }
 async function json(context, args) { return JSON.parse(await execKubectl(context, args)); }
 function kubectlEnv() { return { ...process.env, ...(kubeconfig ? { KUBECONFIG:kubeconfig } : {}) }; }
@@ -107,6 +108,9 @@ async function clusterSummary(context) {
 async function queryPrometheus(query) { if (!prometheusUrl) return { configured:false, query, data:null }; const target = `${prometheusUrl.replace(/\/$/,'')}/api/v1/query?${new URLSearchParams({query})}`; const result = await fetch(target); if (!result.ok) throw new Error(`Prometheus returned ${result.status}`); return { configured:true, query, data:await result.json() }; }
 async function metricsText(context) { let ps,m; if (process.env.NORTHSTAR_MODE === 'kubernetes') { m=await k8sMetrics(context); ps=applyMetrics(await k8sPods(context),m); } else { ps=fakePodObjects(context);m={clusterCpu:42.8,clusterMemory:61.8}; } const lines=['# HELP northstar_cluster_cpu_percent Average node CPU utilization.','# TYPE northstar_cluster_cpu_percent gauge',`northstar_cluster_cpu_percent{context="${context}"} ${m.clusterCpu ?? 0}`,'# HELP northstar_cluster_memory_percent Average node memory utilization.','# TYPE northstar_cluster_memory_percent gauge',`northstar_cluster_memory_percent{context="${context}"} ${m.clusterMemory ?? 0}`,'# HELP northstar_pods_total Total pods visible to Northstar.','# TYPE northstar_pods_total gauge',`northstar_pods_total{context="${context}"} ${ps.length}`,'# HELP northstar_pods_running Running pods visible to Northstar.','# TYPE northstar_pods_running gauge',`northstar_pods_running{context="${context}"} ${ps.filter(p=>p.status==='Running').length}`]; ps.forEach(p=>lines.push(`northstar_pod_status{context="${context}",namespace="${p.namespace}",pod="${p.name}",status="${p.status}"} 1`)); return `${lines.join('\n')}\n`; }
 async function contexts() {
+  if (process.env.NORTHSTAR_MODE === 'kubernetes' && !kubeconfig) {
+    return [{ name:defaultContext, cluster:defaultContext, environment:productionContext(defaultContext) ? 'Production' : 'Development', connected:true, inCluster:true }];
+  }
   if (process.env.NORTHSTAR_MODE !== 'kubernetes') {
     return simulatedContexts.map(x => ({ ...x, connected:false, mode:'simulated' }));
   }
@@ -170,7 +174,7 @@ async function route(req, res) {
       if (mutationGuard(req,res,{action:'port-forward',context:actionContext,namespace:ns,resource:`${kind}/${name}`},a)) return;
       if (!(await authorizeKubernetesAction(actionContext,{...a,action:'port-forward',kind}))) { audit(req,{action:'port-forward',context:actionContext,namespace:ns,resource:`${kind}/${name}`,outcome:'denied',reason:'rbac'}); return send(res,403,{error:'Kubernetes RBAC denied port-forward',authorizationDenied:true}); }
       const id=`${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      const child=spawn(kubectl, ['--context', actionContext, 'port-forward', '-n', ns, `${kind}/${name}`, `${local}:${remote}`], { env:kubectlEnv(), stdio:['ignore','pipe','pipe'] });
+      const child=spawn(kubectl, [...(kubeconfig ? ['--context', actionContext] : []), 'port-forward', '-n', ns, `${kind}/${name}`, `${local}:${remote}`], { env:kubectlEnv(), stdio:['ignore','pipe','pipe'] });
       const entry={id,context:actionContext,kind,name,namespace:ns,localPort:local,remotePort:remote,status:'starting',message:'Starting port-forward',createdAt:new Date().toISOString(),child};
       child.stdout.on('data', d=>{entry.status='running';entry.message=String(d).trim()||entry.message});
       child.stderr.on('data', d=>{entry.message=String(d).trim()||entry.message});

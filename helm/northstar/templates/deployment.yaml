@@ -31,24 +31,30 @@ spec:
               value: {{ .Values.context | quote }}
             - name: NORTHSTAR_READ_ONLY
               value: {{ .Values.readOnly | quote }}
+            {{ if .Values.kubeconfigSecret }}
             - name: NORTHSTAR_KUBECONFIG
               value: /kube/config
+            {{ end }}
             - name: NORTHSTAR_DATA_DIR
               value: /app/data
             - name: NORTHSTAR_PROMETHEUS_URL
               value: {{ .Values.prometheusUrl | quote }}
           volumeMounts:
+            {{ if .Values.kubeconfigSecret }}
             - name: kubeconfig
               mountPath: /kube
               readOnly: true
+            {{ end }}
             {{ if .Values.persistence.enabled }}
             - name: data
               mountPath: /app/data
             {{ end }}
       volumes:
+        {{ if .Values.kubeconfigSecret }}
         - name: kubeconfig
           secret:
             secretName: {{ .Values.kubeconfigSecret }}
+        {{ end }}
         {{ if .Values.persistence.enabled }}
         - name: data
           persistentVolumeClaim:

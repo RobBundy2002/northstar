@@ -9,7 +9,8 @@ service:
 context: production-east
 readOnly: true
 prometheusUrl: ""
-kubeconfigSecret: northstar-kubeconfig
+# Optional. Leave empty to use the pod's ServiceAccount and in-cluster config.
+kubeconfigSecret: ""
 persistence:
   enabled: true
   size: 1Gi

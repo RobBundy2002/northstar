@@ -2,11 +2,13 @@
 
 Northstar is a browser-based Kubernetes operations cockpit for contexts, namespaces, pods, workloads, nodes, events, logs, actions, Metrics Server, and Prometheus.
 
-[![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088ff)](.github/workflows/ci.yml) [![Demo](https://img.shields.io/badge/demo-GitHub%20Pages-63d5d4)](#demo)
+[![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088ff)](.github/workflows/ci.yml) [![Demo](https://img.shields.io/badge/demo-GitHub%20Pages-63d5d4)](#interactive-demo)
 
-## 🚀 Try Northstar
+[Live Demo](https://robbundy2002.github.io/northstar/) · [Documentation](docs/demo.md) · [Run Locally](#demo)
 
-[Open the static live demo](index.html) · [Run the full demo with Docker](docs/demo.md)
+## Try Northstar
+
+[Open the interactive demo](index.html) · [Run the full demo with Docker](docs/demo.md)
 
 No Kubernetes cluster, kubeconfig, Node.js, or `kubectl` is required for the simulated environment.
 
@@ -204,22 +206,20 @@ Actions against contexts with `prod` or `production` in the name require confirm
 
 ## Helm
 
-Build and publish the image to a registry visible to the target cluster, then create a kubeconfig secret:
+The recommended Kubernetes-native deployment runs Northstar in the cluster with its own ServiceAccount and read-only ClusterRole. No kubeconfig Secret is required; the Kubernetes client uses the pod's in-cluster ServiceAccount credentials.
 
 ```bash
 docker build -t registry.example.com/northstar:latest .
 docker push registry.example.com/northstar:latest
-kubectl create secret generic northstar-kubeconfig \
-  --from-file=config="$HOME/.kube/config" \
-  -n northstar --dry-run=client -o yaml | kubectl apply -f -
 helm upgrade --install northstar ./helm/northstar \
   --namespace northstar --create-namespace \
   --set image.repository=registry.example.com/northstar \
   --set image.tag=latest \
-  --set context=my-context \
   --set readOnly=true \
   --set rbac.mode=readonly
 ```
+
+The chart creates and binds the ServiceAccount automatically. In in-cluster mode, `context` is only the Northstar display name; Kubernetes API access comes from the pod identity. Set `--set context=my-cluster` if you want a custom display name.
 
 The Helm deployment creates a PersistentVolumeClaim for dashboard data by default. Configure `persistence.size` and `persistence.storageClass` for the storage class in your cluster.
 
@@ -237,6 +237,8 @@ helm upgrade --install northstar ./helm/northstar \
 
 The chart creates a ServiceAccount, ClusterRole, ClusterRoleBinding, Deployment, and Service. The default role is read-only. Review the operator role before using it in production.
 
+For an external-cluster deployment where Northstar runs outside the target cluster, use the [Docker Compose kubeconfig setup](#docker-compose) instead. Helm also supports an explicitly supplied Secret through `kubeconfigSecret`, but that is an advanced compatibility option rather than the default deployment model.
+
 ## Local demo
 
 The local Docker-backed demo remains available:
@@ -246,9 +248,9 @@ npm run start:all
 ```
 
 If port 5173 or 9090 is already occupied, Northstar automatically selects the next available port and updates its Prometheus scrape target.
-## GitHub Pages demo
+## Interactive demo
 
-The root `index.html` includes a static demo mode for GitHub Pages. It detects that no Northstar API is available and supplies simulated clusters, pods, workloads, events, logs, resources, and dashboards in the browser.
+The root `index.html` provides an interactive demo for GitHub Pages. It detects that no Northstar API is available and supplies simulated clusters, pods, workloads, events, logs, resources, and dashboards in the browser.
 
 To publish it:
 

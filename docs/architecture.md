@@ -18,4 +18,4 @@ Northstar keeps the browser thin: the server owns kubeconfig access, resource va
 
 - Local demo: `docker-compose.yml`, simulated data, no kubeconfig required.
 - Real-cluster handoff: `docker-compose.kubernetes.yml`, kubeconfig mounted read-only.
-- In-cluster deployment: `helm/northstar`, with a ServiceAccount and selectable RBAC profile.
+- In-cluster deployment: `helm/northstar`, with a ServiceAccount and selectable RBAC profile; the pod uses Kubernetes in-cluster credentials by default.
