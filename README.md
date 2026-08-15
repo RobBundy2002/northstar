@@ -2,7 +2,7 @@
 
 Northstar is a browser-based Kubernetes operations cockpit for contexts, namespaces, pods, workloads, nodes, events, logs, actions, Metrics Server, and Prometheus.
 
-[![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088ff)](.github/workflows/ci.yml) [![Demo](https://img.shields.io/badge/demo-GitHub%20Pages-63d5d4)](#interactive-demo)
+[![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088ff)](.github/workflows/ci.yml) [![Tests](https://github.com/RobBundy2002/northstar/actions/workflows/ci.yml/badge.svg?branch=main-1)](https://github.com/RobBundy2002/northstar/actions/workflows/ci.yml) [![Demo](https://img.shields.io/badge/demo-GitHub%20Pages-63d5d4)](#interactive-demo)
 
 [Live Demo](https://robbundy2002.github.io/northstar/) · [Documentation](docs/demo.md) · [Run Locally](#demo)
 
