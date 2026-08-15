@@ -4,11 +4,21 @@ Northstar is a browser-based Kubernetes operations cockpit for contexts, namespa
 
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088ff)](.github/workflows/ci.yml) [![Demo](https://img.shields.io/badge/demo-GitHub%20Pages-63d5d4)](#demo)
 
+## 🚀 Try Northstar
+
+[Open the static live demo](index.html) · [Run the full demo with Docker](docs/demo.md)
+
+No Kubernetes cluster, kubeconfig, Node.js, or `kubectl` is required for the simulated environment.
+
 ![Northstar overview](docs/screenshots/overview.png)
 
 ![Pod and log viewer](docs/screenshots/pod-log-viewer.png)
 
 Northstar gives operators a calm, context-aware view of live and simulated Kubernetes environments. Browse the [incident timeline](docs/screenshots/incident-timeline.png) and [multi-cluster dashboard](docs/screenshots/multi-cluster.png) screenshots, or launch the demo locally in one command.
+
+## Why Northstar?
+
+Managing Kubernetes through `kubectl` is powerful, but investigating incidents often means jumping between commands, logs, events, metrics, and manifests. Northstar brings those workflows together in one context-aware cockpit, while keeping authorization and safety checks on the server side.
 
 ## Demo
 
@@ -27,6 +37,7 @@ Then open `http://localhost:5173`. The full demo setup, sample cluster, and tear
 ## Project guide
 
 - [Architecture](docs/architecture.md)
+- [Security model and threat mitigations](docs/security.md)
 - [RBAC examples](docs/rbac.md)
 - [Contributing](CONTRIBUTING.md)
 - [Roadmap](ROADMAP.md)

@@ -8,24 +8,42 @@ permissions:
   contents: read
 
 jobs:
-  validate:
-    name: Lint → Test → Build → Scan
+  quality:
+    name: Lint and unit/API tests
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Lint
-        run: npm run lint
-      - name: Test
-        run: npm test
-      - name: Build application image
+      - run: npm run lint
+      - run: npm test
+
+  integration:
+    name: Kubernetes integration tests
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: helm/kind-action@v1.12.0
+        with:
+          cluster_name: northstar-ci
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: kubectl apply -f k8s/northstar-demo.yaml
+      - run: NORTHSTAR_INTEGRATION=true npm test
+
+  build-and-scan:
+    name: Docker build and security scan
+    needs: integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker build
         run: docker build --tag northstar:ci .
-      - name: Security scan
-        uses: aquasecurity/trivy-action@0.28.0
+      - name: Trivy security scan
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: northstar:ci
           format: table
