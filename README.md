@@ -37,13 +37,19 @@ Run `npm run check` for linting and automated API tests. GitHub Actions runs val
 ## What Northstar Provides
 
 - Command palette with `Cmd+K` / `Ctrl+K`
+- First-run diagnostics for kubeconfig, contexts, RBAC, Metrics Server, and Prometheus
+- RBAC-aware actions that disable controls the mounted kubeconfig cannot perform
 - Multi-cluster summary across every kube context
 - Pod, workload, node, event, and alert views
+- Workload detail with pods, services, events, and multi-pod logs
 - Generic resource explorer for built-in Kubernetes resources and CRDs
 - YAML and describe inspector for live resources
-- Live pod logs and guarded pod exec
+- Live pod logs, multi-pod log tailing, filters, and guarded pod exec
 - Managed local port-forwards
+- Incident timeline combining events and audited actions
 - Metrics Server and Prometheus integration
+- Shareable URL hashes for context, namespace, and current view
+- Production guardrails and audit logging for cluster-changing actions
 - Read-only mode for safe real-cluster handoffs
 
 ## Connect to an existing cluster
@@ -70,6 +76,8 @@ export NORTHSTAR_READ_ONLY=true
 Read-only mode still shows contexts, namespaces, pods, workloads, nodes, events, logs, Metrics Server values, and Prometheus queries. It blocks rollout restart, scale, resource changes, delete, and pod exec at the API layer.
 
 Read-only mode also blocks managed port-forward start/stop operations. Existing resource discovery, YAML, describe, logs, events, metrics, and Prometheus query views remain available.
+
+Northstar also checks the current kubeconfig with `kubectl auth can-i` and disables UI controls that are not permitted by RBAC. The backend enforces read-only mode regardless of UI state.
 
 Enable actions only after using a scoped kubeconfig or ServiceAccount:
 
@@ -176,6 +184,12 @@ kubectl apply -f k8s/northstar-operator-rbac.yaml
 ```
 
 Only use operator access with `NORTHSTAR_READ_ONLY=false`.
+
+## Operator Guardrails
+
+When operator mode is enabled, Northstar writes recent action attempts to `data/audit.jsonl`.
+
+Actions against contexts with `prod` or `production` in the name require confirmation. Scale-to-zero also requires confirmation. These guardrails apply to the API, not only the browser UI.
 
 ## Helm
 

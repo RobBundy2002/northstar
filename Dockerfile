@@ -13,7 +13,9 @@ RUN apt-get update \
 WORKDIR /app
 COPY package.json server.js start-all.js docker-entrypoint.sh index.html prometheus.yml ./
 COPY k8s ./k8s
-RUN mkdir -p /app/data && chown -R node:node /app
+RUN chmod +x /app/docker-entrypoint.sh \
+  && mkdir -p /app/data \
+  && chown -R node:node /app
 
 USER node
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

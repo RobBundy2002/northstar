@@ -4,7 +4,7 @@ const { readFileSync, writeFileSync, unlinkSync } = require('node:fs');
 const path = require('node:path');
 
 const kubectl = process.env.NORTHSTAR_KUBECTL || '/tmp/northstar-kubectl';
-const prometheusName = 'northstar-prometheus';
+const prometheusName = `northstar-prometheus-${process.pid}`;
 const configPath = path.join('/tmp', `northstar-prometheus-${process.pid}.yml`);
 const children = [];
 
