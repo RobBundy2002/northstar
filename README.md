@@ -6,6 +6,8 @@ Northstar is a browser-based Kubernetes operations cockpit for contexts, namespa
 
 ![Northstar overview](docs/screenshots/overview.png)
 
+![Pod and log viewer](docs/screenshots/pod-log-viewer.png)
+
 Northstar gives operators a calm, context-aware view of live and simulated Kubernetes environments. Browse the [incident timeline](docs/screenshots/incident-timeline.png) and [multi-cluster dashboard](docs/screenshots/multi-cluster.png) screenshots, or launch the demo locally in one command.
 
 ## Demo
@@ -13,7 +15,7 @@ Northstar gives operators a calm, context-aware view of live and simulated Kuber
 No cluster or kubeconfig is required:
 
 ```bash
-docker compose -f docker-compose.demo.yml up --build
+docker compose up --build
 ```
 
 Then open `http://localhost:5173`. The full demo setup, sample cluster, and teardown instructions live in [docs/demo.md](docs/demo.md).
@@ -89,7 +91,7 @@ Build and run Northstar with a kubeconfig mounted read-only. Compose binds the U
 ```bash
 cp .env.example .env
 # edit .env and set NORTHSTAR_CONTEXT plus NORTHSTAR_KUBECONFIG_PATH
-docker compose up --build
+docker compose -f docker-compose.kubernetes.yml up --build
 ```
 
 Open `http://localhost:5173`.
@@ -99,9 +101,9 @@ Both Northstar dashboard data and Prometheus time-series data are stored in name
 For a persistent server deployment:
 
 ```bash
-docker compose up -d --build
-docker compose ps
-docker compose logs -f northstar
+docker compose -f docker-compose.kubernetes.yml up -d --build
+docker compose -f docker-compose.kubernetes.yml ps
+docker compose -f docker-compose.kubernetes.yml logs -f northstar
 ```
 
 Docker's `restart: unless-stopped` policy starts both services again after a host reboot. Back up the volumes periodically:
@@ -136,7 +138,7 @@ NORTHSTAR_READ_ONLY=true
 Then run:
 
 ```bash
-docker compose up --build
+docker compose -f docker-compose.kubernetes.yml up --build
 ```
 
 To validate the kubeconfig before starting Northstar:

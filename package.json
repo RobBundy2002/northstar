@@ -10,7 +10,7 @@
     "start:k8s:prom": "NORTHSTAR_MODE=kubernetes NORTHSTAR_CONTEXT=production-east NORTHSTAR_PROMETHEUS_URL=http://localhost:9090 NORTHSTAR_KUBECTL=${NORTHSTAR_KUBECTL:-/tmp/northstar-kubectl} node server.js",
     "start:all": "node start-all.js",
     "prometheus:start": "docker run --rm --name northstar-prometheus --add-host=host.docker.internal:host-gateway -p 9090:9090 -v \"$PWD/prometheus.yml:/etc/prometheus/prometheus.yml:ro\" prom/prometheus",
-    "lint": "node --check server.js && node --check index.js && node --check start-all.js",
+    "lint": "node --check server.js && node --check index.js && node --check start-all.js && node --check lib/validation.js && node --check test/server.test.js && node --check test/unit.test.js && node --check test/frontend.test.js && node --check test/kubernetes.integration.test.js",
     "test": "node --test",
     "check": "npm run lint && npm test"
   },
